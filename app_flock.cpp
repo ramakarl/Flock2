@@ -190,17 +190,19 @@ void Sample::DefaultParams ()
 	m_Params.drag_factor =			0.003;									// drag factor
 	m_Params.safe_radius =			10;											// radius of avoidance
 	m_Params.border_cnt =				30;											// border width (# birds)
-	m_Params.border_amt =				0.02f;									// border steering amount
-	m_Params.avoid_angular_amt = 0.2f;									// bird angular avoidance amount
-	m_Params.avoid_power_amt =	50.0f;									// bird power avoidance amount
-	m_Params.avoid_power_ctr =	4;											// bird power avoidance center setting (neutral power)
-	m_Params.align_amt =				0.030f;									// bird alignment amount
-	m_Params.cohesion_amt =			0.002f;									// bird cohesion amount
+	m_Params.border_amt =				0.20f;								 	  // border steering amount
+	
+	m_Params.avoid_angular_amt= 0.10f;									// bird angular avoidance amount
+	m_Params.avoid_power_amt =	40.0f;									// bird power avoidance amount
+	m_Params.avoid_power_ctr =	3;											// bird power avoidance center setting (neutral power)
+	
+	m_Params.align_amt =				0.400f;									// bird alignment amount
+	m_Params.cohesion_amt =			0.005f;									// bird cohesion amount
 	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
 	m_Params.pitch_max =				40;											// max pitch (degrees)
 	m_Params.reaction_delay =		0.0005f;								// reaction delay
-	m_Params.dynamic_stability = 0.2f;									// dyanmic stability factor
+	m_Params.dynamic_stability = 0.4f;									// dyanmic stability factor
 	m_Params.air_density =			1.225;									// air density (kg/m^3)
 	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
 	m_Params.front_area =				0.1f;										// section area of bird into wind

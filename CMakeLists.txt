@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8)
-set(PROJNAME Flock)
+set(PROJNAME Flock2)
 Project(${PROJNAME})
 Message(STATUS "-------------------------------")
 Message(STATUS "Processing Project ${PROJNAME}:")
