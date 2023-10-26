@@ -186,17 +186,17 @@ void Sample::DefaultParams ()
 	m_Params.wind =							Vec3F(0,0,0);						// wind direction & strength
 	m_Params.fov =							120;										// bird field-of-view (degrees)
 	m_Params.fovcos = cos ( m_Params.fov * DEGtoRAD );
-	m_Params.lift_factor =			0.005;									// lift factor
+	m_Params.lift_factor =			0.006;									// lift factor
 	m_Params.drag_factor =			0.003;									// drag factor
 	m_Params.safe_radius =			10;											// radius of avoidance
-	m_Params.border_cnt =				30;											// border width (# birds)
-	m_Params.border_amt =				0.20f;								 	  // border steering amount
+	m_Params.border_cnt =				20;											// border width (# birds)
+	m_Params.border_amt =				0.04f;								 	// border steering amount (keep <0.1)
 	
 	m_Params.avoid_angular_amt= 0.10f;									// bird angular avoidance amount
 	m_Params.avoid_power_amt =	40.0f;									// bird power avoidance amount
 	m_Params.avoid_power_ctr =	3;											// bird power avoidance center setting (neutral power)
 	
-	m_Params.align_amt =				0.400f;									// bird alignment amount
+	m_Params.align_amt =				0.300f;									// bird alignment amount
 	m_Params.cohesion_amt =			0.005f;									// bird cohesion amount
 	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
@@ -771,6 +771,8 @@ void Sample::Advance ()
 
 		int numPoints = m_Params.num_birds;
 
+		Vec3F centroid (0,100,0);
+
 		//--- Reynold's behaviors	
 		//		
 		for (int n=0; n < numPoints; n++) {
@@ -786,7 +788,7 @@ void Sample::Advance ()
 			float d = b->nbr_cnt / m_Params.border_cnt;
 			if ( d < 1.0 ) { 
 				b->clr.Set(0,1,0, 1);	
-				dirj = m_centroid - b->pos; dirj.Normalize();
+				dirj = centroid - b->pos; dirj.Normalize();
 				dirj *= b->orient.inverse();
 				yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 				pitch = asin( dirj.y )*RADtoDEG;
@@ -1212,7 +1214,7 @@ void Sample::display ()
 				drawCircle3D ( b->pos, m_cam->getPos(), 1.2, Vec4F(1,0,0,1) );
 			}			
 		}
-		drawCircle3D ( m_centroid, m_cam->getPos(), 2, Vec4F(0,1,0,1) );
+		// drawCircle3D ( m_centroid, m_cam->getPos(), 2, Vec4F(0,1,0,1) );
 
 		// Draw acceleration grid
 		if (m_draw_grid) {

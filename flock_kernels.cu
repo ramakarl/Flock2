@@ -186,7 +186,6 @@ __device__ uint getGridCell ( float3 pos, uint3& gc )
 
 inline __device__ __host__ float circleDelta(float b, float a)
 {
-	// (((b-a) > 180) ? (b-a)-360 : ((b-a) < -180) ? (b-a)+360 : (b-a))
 	float d = b-a;
 	d = (d > 180) ? d-360 : (d<-180) ? d+360 : d;
 	return d;	
@@ -222,6 +221,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	b->clr = make_float4(0,0,0,0);
 	
 	ctrlq = quat_inverse ( b->orient );
+
   float3 centroid = make_float3(0,100,0);
 
 	// Turn isolated birds toward flock centroid
