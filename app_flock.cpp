@@ -207,7 +207,7 @@ void Sample::DefaultParams ()
 	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
 	m_Params.front_area =				0.1f;										// section area of bird into wind
 	m_Params.bound_soften	=			50;											// ground detection range
-	m_Params.avoid_ground_power = 4;										// ground avoid power setting 
+	m_Params.avoid_ground_power = 5;										// ground avoid power setting 
 	m_Params.avoid_ground_amt = 0.5f;										// ground avoid strength
 	m_Params.avoid_ceil_amt =   0.1f;										// ceiling avoid strength
 
@@ -1237,7 +1237,7 @@ void Sample::display ()
 				
 				// visualize velocity
 				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);			
-				float v2 = (b->power - m_Params.avoid_power_ctr + 20) / 40.0f;
+				float v2 = (b->power + 3) / 6.0f;
 				if (b->clr.w==0) {
 					drawLine3D ( b->pos,		b->pos + (b->vel*0.05f),	Vec4F(v2, 1-v2, 1-v2,1) );
 				} else {
