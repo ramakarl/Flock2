@@ -1,11 +1,10 @@
 //--------------------------------------------------------
 //
 // Flock v2
-// 
 // Rama Hoetzlein, 2023
 //
 //--------------------------------------------------------------------------------
-// Copyright 2019-2023 (c) Quanta Sciences, Rama Hoetzlein, ramakarl.com
+// Copyright 2023 (c) Quanta Sciences, Rama Hoetzlein, ramakarl.com
 //
 // * Derivative works may append the above copyright notice but should not remove or modify earlier notices.
 //
@@ -240,6 +239,7 @@ void Sample::Reset (int num )
 	//
 	for (int n=0; n < numPoints; n++ ) {
 		
+		//-- test: head-on impact of two bird flocks
 		/*bool ok = false;
 		while (!ok) {
 			pos = m_rnd.randV3( -50, 50 );
@@ -253,7 +253,8 @@ void Sample::Reset (int num )
 				ok = true;
 			}
 		} */
-		 
+		
+		// randomly distribute birds
 		pos = m_rnd.randV3( -100, 100 ) + Vec3F(0, 100, 0);
 		vel = m_rnd.randV3( -20, 20 );
 		h = m_rnd.randF(-180, 180);
@@ -419,13 +420,14 @@ void Sample::InsertIntoGrid ()
 		cuCheck ( cuMemsetD8 ( m_Birds.gpu(FGCELL),		0,	numPoints*sizeof(int) ), "InsertParticlesCUDA", "cuMemsetD8", "FGCELL", DEBUG_CUDA );
 		cuCheck ( cuMemsetD8 ( m_Birds.gpu(FGNDX),		0,	numPoints*sizeof(int) ), "InsertParticlesCUDA", "cuMemsetD8", "FGNDX", DEBUG_CUDA );
 
+		// Insert into grid (GPU)
 		void* args[1] = { &numPoints };
 		cuCheck(cuLaunchKernel ( m_Kernel[KERNEL_INSERT], m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL),
 			"InsertParticlesCUDA", "cuLaunch", "FUNC_INSERT", DEBUG_CUDA );
 
 	} else {
 
-		// Insert particles into grid 
+		// Insert into grid 
 		// Reset all grid cells to empty		
 		memset( m_Grid.bufUI(AGRIDCNT),	0,	m_Accel.gridTotal*sizeof(uint));
 		memset( m_Grid.bufUI(AGRIDOFF),	0,	m_Accel.gridTotal*sizeof(uint));
@@ -491,7 +493,8 @@ void Sample::PrefixSumGrid ()
 		if ( numElem1 > SCAN_BLOCKSIZE*xlong(SCAN_BLOCKSIZE)*SCAN_BLOCKSIZE) {
 			dbgprintf ( "ERROR: Number of elements exceeds prefix sum max. Adjust SCAN_BLOCKSIZE.\n" );
 		}
-
+		// prefix scan in blocks with up to two hierarchy layers
+		// this allows total # elements up to SCAN_BLOCKSIZE^3 = 512^3 = 134 million max
 		void* argsA[5] = {&array1, &scan1, &array2, &numElem1, &zero_offsets }; // sum array1. output -> scan1, array2
 		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXSUM], numElem2, 1, 1, threads, 1, 1, 0, NULL, argsA, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXSUM:A", DEBUG_CUDA );
 
@@ -509,12 +512,12 @@ void Sample::PrefixSumGrid ()
 
 		void* argsE[3] = { &scan1, &scan2, &numElem1 };		// merge scan2 into scan1. output -> scan1
 		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXFIXUP], numElem2, 1, 1, threads, 1, 1, 0, NULL, argsE, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXFIXUP:E", DEBUG_CUDA );
-		// prefix scan output: scan1 = AGRIDOFF
+		// returns grid offsets: scan1 => AGRIDOFF
 
 		// Counting Sort
 		//
 		// transfer particle data to temp buffers 
-		//  (required by gpu counting sort algorithm, gpu-to-gpu copy, no sync needed)	
+		//  (required by gpu counting sort algorithm, gpu-to-gpu copy, no context sync needed)	
 		m_Birds.CopyAllBuffers ( &m_BirdsTmp, DT_CUMEM );
 		
 		// sort
@@ -526,6 +529,9 @@ void Sample::PrefixSumGrid ()
 	} else {
 
 		// PrefixSum - CPU
+		// cpu scan and sort is implemented to give identical output as gpu version,
+		// *except* that birds are not deep copied for cache coherence as they are on gpu.
+		// the grid cells will contain the same list of points in either case.
 		int numPoints = m_Params.num_birds;
 		int numCells = m_Accel.gridTotal;
 		uint* mgrid = (uint*) m_Grid.bufI(AGRID);
@@ -572,9 +578,9 @@ void Sample::FindNeighbors ()
 	} else {
 
 		// Find neighborhood of each bird to compute:
-		// - near_pos - position of nearest bird
-		// - ave_pos  - average centroid of neighbor birds
-		// - ave_dir  - direction of neighbor birds	
+		// - near_j  - id of nearest bird
+		// - ave_pos - average centroid of neighbor birds
+		// - ave_vel - average velocity of neighbor birds	
 		//
 		float d = m_Accel.sim_scale;
 		float d2 = d * d;
@@ -746,6 +752,7 @@ void Sample::Advance ()
 
 		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_ADVANCE],  m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL), "Advance", "cuLaunch", "FUNC_ADVANCE", DEBUG_CUDA );
 
+		// Retrieve birds from GPU for rendering & visualization
 		m_Birds.Retrieve ( FBIRD );
 		
 		cuCtxSynchronize ();
@@ -827,6 +834,8 @@ void Sample::Advance ()
 
 
 			// 1b. Incoming neighbor avoidance
+			// - avoid bird with opposiing velocity direction (incoming bird)
+			// - not necessary, covered by angular avoidance if dt is small enough
 			/* if ( b->near_in != -1 ) {
 				// get incoming bird
 				bj = (Bird*) m_Birds.GetElem(0, b->near_in);						
@@ -850,7 +859,7 @@ void Sample::Advance ()
 			// Rule 2. Alignment - orient toward average direction		
 			dirj = b->ave_vel;
 			dirj.Normalize();
-			dirj *= b->orient.inverse();		// using inverse orient for world-to-local xform		
+			dirj *= b->orient.inverse();		// using inverse orient for world-to-local xform
 			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 			pitch = asin( dirj.y )*RADtoDEG;
 			b->target.z += yaw   * m_Params.align_amt;
@@ -985,7 +994,7 @@ void Sample::Advance ()
 
 			// Update Orientation
 			// Directional stability: airplane will typically reorient toward the velocity vector
-			//  see: https://en.wikipedia.org/wiki/Directional_stability
+			//  see: https://github.com/ramakarl/Flightsim
 			// this is an assumption yet much simpler/faster than integrating body orientation
 			// this way we dont need torque, angular vel, or rotational inertia.
 			// stalls are possible but not flat spins or 3D flying		
