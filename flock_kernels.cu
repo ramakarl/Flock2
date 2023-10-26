@@ -18,6 +18,7 @@
 #include "datax.h"
 
 __constant__ Accel		FAccel;
+__constant__ Params		FParams;
 __constant__ cuDataX	FBirds;
 __constant__ cuDataX	FBirdsTmp;
 __constant__ cuDataX	FGrid;
@@ -90,13 +91,6 @@ extern "C" __global__ void countingSortFull ( int pnum )
 		Bird* b = ((Bird*) FBirds.data(FBIRD)) + sort_ndx;
 		Bird* bt = ((Bird*) FBirdsTmp.data(FBIRD)) + i;
 
-		if (b->id==7) {		
-			printf ("---- COUNTING SORT (GPU), id %d, #%d <- #%d\n", b->id, sort_ndx, i);
-			printf (" orient:    %f, %f, %f, %f\n", b->orient.x, b->orient.y, b->orient.z, b->orient.w );		
-			printf (" orientTmp: %f, %f, %f, %f\n", bt->orient.x, bt->orient.y, bt->orient.z, bt->orient.w );		
-		}
-	
-
 		FBirds.bufI (FGCELL) [sort_ndx] =	icell;
 		FBirds.bufI (FGNDX) [sort_ndx] =	indx; 		
 
@@ -156,7 +150,7 @@ extern "C" __global__ void findNeighbors ( int pnum)
 				dist = normalize( bj->pos - bi->pos );
 				birdang = dot ( diri, dist );
 				
-				if (birdang > fov) {
+				if (birdang > FParams.fovcos ) {
 
 					// find nearest
 					dsq = sqrt(dsq);			
@@ -198,10 +192,6 @@ inline __device__ __host__ float circleDelta(float b, float a)
 	return d;	
 }
 
-#define LIFT_FACTOR			0.005
-#define DRAG_FACTOR			0.003
-#define MASS						0.1
-#define SAFE_RADIUS			10.0
 
 extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int numPnts )
 {		
@@ -218,10 +208,8 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	quat4 ctrlq;
 	float airflow, aoa, L, pitch, yaw;
 
-	
-
 	#ifdef DEBUG_BIRD
-		if (b->id==7) {		
+		if (b->id == DEBUG_BIRD) {		
 			printf ("---- ADVANCE START (GPU), id %d, #%d\n", b->id, i );
 			printf (" orient:  %f, %f, %f, %f\n", b->orient.x, b->orient.y, b->orient.z, b->orient.w );		
 			printf (" target:  %f, %f, %f\n", b->target.x, b->target.y, b->target.z );		
@@ -237,17 +225,15 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
   float3 centroid = make_float3(0,100,0);
 
 	// Turn isolated birds toward flock centroid
-	float d = b->nbr_cnt / 30.0f;
+	float d = b->nbr_cnt / FParams.border_cnt;
 	if ( d < 1.0 ) { 
 		b->clr = make_float4(0, 1, 0, 1);	
 		dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 		pitch = asin( dirj.y )*RADtoDEG;
-		b->target.z +=   yaw * 0.005;
-		b->target.y += pitch * 0.005;		
+		b->target.z +=   yaw * FParams.border_amt;
+		b->target.y += pitch * FParams.border_amt;		
 	}
-
-
 
 
 	if ( b->nbr_cnt > 0 ) {
@@ -261,25 +247,24 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 			dirj = bj->pos - b->pos;
 			dist = length( dirj );
 
-			if ( dist < SAFE_RADIUS ) {
+			if ( dist < FParams.safe_radius ) {
 
 				// Angular avoidance
 				dirj = quat_mult( (dirj/dist), ctrlq );
 				yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
 				pitch = asin( dirj.y ) * RADtoDEG;
-				dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));
-				//dist = fmax( 1.0f, fmin( dist, 100.0f ));
-				b->target.z -= yaw * 0.2f / dist;
-				b->target.y -= pitch * 0.2f / dist;
+				dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));				
+				b->target.z -= yaw *	 FParams.avoid_angular_amt / dist;
+				b->target.y -= pitch * FParams.avoid_angular_amt / dist;
 
 				// Power adjust
-				L = (length(b->vel) - length(bj->vel));
-				b->power = 3 - L * L;
+				L = (length(b->vel) - length(bj->vel)) * FParams.avoid_power_amt;
+				b->power = FParams.avoid_power_ctr - L; // * L;
 
 			}
 		}
-		if (b->power < -40) b->power = -40;
-		if (b->power > 40) b->power = 40;	
+		if (b->power < FParams.min_power) b->power = FParams.min_power;
+		if (b->power > FParams.max_power) b->power = FParams.max_power;	
 
 
 		// Rule 2. Alignment
@@ -287,15 +272,15 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 		dirj = quat_mult ( normalize( b->ave_vel ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
 		pitch = asin( dirj.y ) * RADtoDEG;
-		b->target.z += yaw   * 0.050f;
-		b->target.y += pitch * 0.050f;
+		b->target.z += yaw   * FParams.align_amt;
+		b->target.y += pitch * FParams.align_amt;
 
 		// Rule 3. Cohesion
 		dirj = quat_mult ( normalize( b->ave_pos - b->pos ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
 		pitch = asin( dirj.y ) * RADtoDEG;
-		b->target.z += yaw   * 0.001f;
-		b->target.y += pitch * 0.001f; 		
+		b->target.z += yaw   * FParams.cohesion_amt;
+		b->target.y += pitch * FParams.cohesion_amt; 		
 		 
 	}
 
@@ -309,8 +294,8 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	// Direction of motion
 	b->speed = length( b->vel );
 	vaxis = b->vel / b->speed;
-	if ( b->speed < 30) b->speed = 30;
-	if ( b->speed > 80) b->speed = 80;
+	if ( b->speed < FParams.min_speed) b->speed = FParams.min_speed;
+	if ( b->speed > FParams.max_speed) b->speed = FParams.max_speed;
 	if ( b->speed == 0) vaxis = fwd;
 
 	angs = quat_to_euler ( b->orient );
@@ -319,23 +304,21 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	angs.z = fmodulus ( angs.z, 180.0 );
 	b->target.z = fmodulus ( b->target.z, 180 );
 	b->target.x = circleDelta ( b->target.z, angs.z ) * 0.5f;
-	b->target.y *= 0.999;
-	if ( b->target.y > 40 ) b->target.y = 40;
-	if ( b->target.y < -40 ) b->target.y = -40;
+	b->target.y *= FParams.pitch_decay; 
+	if ( b->target.y < FParams.pitch_min ) b->target.y = FParams.pitch_min;
+	if ( b->target.y > FParams.pitch_max ) b->target.y = FParams.pitch_max;	
 	if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
-
-  float reaction_delay = 0.0005;
 
 	// Roll - Control input
 	// - orient the body by roll
-	ctrlq = quat_from_angleaxis ( (b->target.x - angs.x) * reaction_delay, fwd );
+	ctrlq = quat_from_angleaxis ( (b->target.x - angs.x) * FParams.reaction_delay, fwd );
 	b->orient = quat_normalize ( quat_mult ( b->orient, ctrlq ) );
 
 	// Pitch & Yaw - Control inputs
 	// - apply 'torque' by rotating the velocity vector based on pitch & yaw inputs				
-	ctrlq = quat_from_angleaxis ( circleDelta(b->target.z, angs.z) * reaction_delay, up * -1.f );
+	ctrlq = quat_from_angleaxis ( circleDelta(b->target.z, angs.z) * FParams.reaction_delay, up * -1.f );
 	vaxis = normalize ( quat_mult ( vaxis, ctrlq ) ); 
-	ctrlq = quat_from_angleaxis ( (b->target.y - angs.y) * reaction_delay, right );
+	ctrlq = quat_from_angleaxis ( (b->target.y - angs.y) * FParams.reaction_delay, right );
 	vaxis = normalize ( quat_mult ( vaxis, ctrlq ) );
 
 	// Adjust velocity vector
@@ -343,20 +326,19 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	force = make_float3(0,0,0);	
 
 	// Dynamic pressure		
-	airflow = b->speed;  // + m_wind.Dot ( fwd*-1.0f );		// airflow = air over wing due to speed + external wind
-	float p = 1.225;																	// air density, kg/m^3
-	float dynamic_pressure = 0.5f * p * airflow * airflow;
+	airflow = b->speed + dot ( FParams.wind, fwd*-1.0f );		// airflow = air over wing due to speed + external wind	
+	float dynamic_pressure = 0.5f * FParams.air_density * airflow * airflow;
 
 	// Lift force
 	aoa = acos( dot(fwd, vaxis) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  	if (isnan(aoa)) aoa = 1;
 	// CL = sin(aoa*0.2) = coeff of lift, approximate CL curve with sin
-	L = sin( aoa * 0.2) * dynamic_pressure * LIFT_FACTOR * 0.5;		// lift equation. L = CL (1/2 p v^2) A
+	L = sin( aoa * 0.2) * dynamic_pressure * FParams.lift_factor * 0.5;		// lift equation. L = CL (1/2 p v^2) A
 	lift = up * L;
 	force += lift;	
 
 	// Drag force	
-	drag = vaxis * dynamic_pressure * DRAG_FACTOR * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
+	drag = vaxis * dynamic_pressure * FParams.drag_factor  * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
 	force += drag; 
 
 	// Thrust force
@@ -364,9 +346,9 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	force += thrust;
 	
 	// Integrate position		
-	accel = force / MASS;						// body forces	
-	accel += make_float3(0, -9.8, 0);	// gravity
-	//b->accel += m_wind * p * 0.1f;				// wind force. Fw = w^2 p * A, where w=wind speed, p=air density, A=frontal area
+	accel = force / FParams.mass;						// body forces	
+	accel += FParams.gravity;								// gravity
+	accel += FParams.wind * FParams.air_density * FParams.front_area;				// wind force. Fw = w^2 p * A, where w=wind speed, p=air density, A=frontal area
 	
 	b->pos += b->vel * dt;
 
@@ -378,17 +360,17 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 
 	// Ground avoidance
 	L = b->pos.y - FAccel.bound_min.y;
-	if ( L < 50 ) {			
-		L = (50-L)/50.0f;
-		b->target.y += L * 0.5;			
-		b->power = 4;
+	if ( L < FParams.bound_soften ) {			
+		L = (FParams.bound_soften - L) / FParams.bound_soften;
+		b->target.y += L * FParams.avoid_ground_amt;
+		b->power = FParams.avoid_ground_power;
 	} 
 
 	// Ceiling avoidance
 	L = FAccel.bound_max.y - b->pos.y;
-	if ( L < 50  ) {	
-		L = (50-L)/50.0f;									
-		b->target.y -= L * 0.1; 						
+	if ( L < FParams.bound_soften ) {	
+		L = (FParams.bound_soften - L) / FParams.bound_soften;
+		b->target.y -= L * FParams.avoid_ceil_amt; 						
 	} 
 
 	// Integrate velocity
@@ -402,13 +384,13 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	// this is an assumption yet much simpler/faster than integrating body orientation
 	// this way we dont need torque, angular vel, or rotational inertia.
 	// stalls are possible but not flat spins or 3D flying		
-	ctrlq = quat_rotation_fromto ( fwd, vaxis, 0.4 );
+	ctrlq = quat_rotation_fromto ( fwd, vaxis, FParams.dynamic_stability  );
 	if ( !isnan(ctrlq.x) ) {
 		b->orient = quat_normalize( quat_mult ( b->orient, ctrlq ) );
 	}
 
 	#ifdef DEBUG_BIRD
-		if (b->id==7) {
+		if (b->id == DEBUG_BIRD) {
 			printf ("---- ADVANCE END (GPU), id %d, #%d\n", b->id, i );
 			printf (" speed:   %f\n", b->speed );
 			printf (" airflow: %f\n", airflow );

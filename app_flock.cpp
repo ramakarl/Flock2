@@ -24,6 +24,7 @@
 
 #include <time.h>
 #include "main.h"					// window system 
+#include "timex.h"				// for accurate timing
 #include "quaternion.h"
 #include "datax.h"
 #include "mersenne.h"
@@ -64,6 +65,7 @@ public:
 	void			PrefixSumGrid ();
 	void			DrawAccelGrid ();	
 
+	void			DefaultParams ();
 	void			Reset (int num_bird );
 	void		  Run ();
 	void			Advance ();		
@@ -72,19 +74,17 @@ public:
 	void			CameraToCentroid ();
 	void			drawGrid( Vec4F clr );
 
-	int				m_num_birds;
 	DataX			m_Birds;
 	DataX			m_BirdsTmp;
 	DataX			m_Grid;
 	Accel			m_Accel;
+	Params		m_Params;
 
-	float			m_DT;	
-	Vec3F			m_wind;
 	Mersenne  m_rnd;	
+
 	Vec3F			m_centroid;
 
 	float			m_time;
-	float			m_min_speed, m_max_speed;
 	bool			m_run;
 	int				m_cam_mode;
 	bool			m_cam_adjust;
@@ -107,6 +107,7 @@ public:
 	CUcontext		m_ctx;
 	CUdevice		m_dev; 
 	CUdeviceptr	m_cuAccel;
+	CUdeviceptr	m_cuParam;
 	CUmodule		m_Module;
 	CUfunction	m_Kernel[ KERNEL_MAX ];
 };
@@ -172,6 +173,45 @@ void ComputeNumBlocks (int numPnts, int minThreads, int &numBlocks, int &numThre
     numBlocks = (numThreads==0) ? 1 : iDivUp ( numPnts, numThreads );
 }
 
+void Sample::DefaultParams ()
+{
+	// Flock parameters
+	//
+	m_Params.DT =								0.002;									// timestep
+	m_Params.mass =							0.1;										// bird mass (kg)
+	m_Params.min_speed =				30;											// min speed
+	m_Params.max_speed =				80;											// max speed
+	m_Params.min_power =				-40;										// min power (acceleration)
+	m_Params.max_power =				40;											// max power (acceleration)
+	m_Params.wind =							Vec3F(0,0,0);						// wind direction & strength
+	m_Params.fov =							120;										// bird field-of-view (degrees)
+	m_Params.fovcos = cos ( m_Params.fov * DEGtoRAD );
+	m_Params.lift_factor =			0.005;									// lift factor
+	m_Params.drag_factor =			0.003;									// drag factor
+	m_Params.safe_radius =			10;											// radius of avoidance
+	m_Params.border_cnt =				30;											// border width (# birds)
+	m_Params.border_amt =				0.02f;									// border steering amount
+	m_Params.avoid_angular_amt = 0.2f;									// bird angular avoidance amount
+	m_Params.avoid_power_amt =	50.0f;									// bird power avoidance amount
+	m_Params.avoid_power_ctr =	4;											// bird power avoidance center setting (neutral power)
+	m_Params.align_amt =				0.030f;									// bird alignment amount
+	m_Params.cohesion_amt =			0.002f;									// bird cohesion amount
+	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
+	m_Params.pitch_min =				-40;										// min pitch (degrees)
+	m_Params.pitch_max =				40;											// max pitch (degrees)
+	m_Params.reaction_delay =		0.0005f;								// reaction delay
+	m_Params.dynamic_stability = 0.2f;									// dyanmic stability factor
+	m_Params.air_density =			1.225;									// air density (kg/m^3)
+	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
+	m_Params.front_area =				0.1f;										// section area of bird into wind
+	m_Params.bound_soften	=			50;											// ground detection range
+	m_Params.avoid_ground_power = 4;										// ground avoid power setting 
+	m_Params.avoid_ground_amt = 0.5f;										// ground avoid strength
+	m_Params.avoid_ceil_amt =   0.1f;										// ceiling avoid strength
+
+}
+
+
 
 void Sample::Reset (int num )
 {
@@ -182,19 +222,11 @@ void Sample::Reset (int num )
 
 	// Global flock variables
 	//
-	m_num_birds = num;
-
-	// Speed limits
-	m_min_speed = 30.0;
-	m_max_speed = 80.0;	
-	
-	m_DT = 0.006;
-	
-	m_wind.Set (0, 0, 0);
+	m_Params.num_birds = num;
 	
 	// Initialized bird memory
 	//
-	int numPoints = m_num_birds;
+	int numPoints = m_Params.num_birds;
 	uchar usage = (m_gpu) ? DT_CPU | DT_CUMEM : DT_CPU;
 
 	m_Birds.DeleteAllBuffers ();
@@ -204,7 +236,7 @@ void Sample::Reset (int num )
 
 	// Add birds
 	//
-	for (int n=0; n < m_num_birds; n++ ) {
+	for (int n=0; n < numPoints; n++ ) {
 		
 		/*bool ok = false;
 		while (!ok) {
@@ -247,13 +279,15 @@ void Sample::Reset (int num )
 			m_kernels_loaded = true;
 			LoadAllKernels ();
 			size_t len;
-			cuCheck ( cuModuleGetGlobal ( &m_cuAccel, &len, m_Module, "FAccel" ), "Initialize", "cuModuleGetGlobal", "cuAccel", true );
+			cuCheck ( cuModuleGetGlobal ( &m_cuAccel,  &len, m_Module, "FAccel" ), "Initialize", "cuModuleGetGlobal", "cuAccel", true );
+			cuCheck ( cuModuleGetGlobal ( &m_cuParam, &len, m_Module, "FParams" ), "Initialize", "cuModuleGetGlobal", "cuParam", true );
 		}
 		// Assign GPU symbols
 		m_Birds.AssignToGPU ( "FBirds", m_Module );
 		m_BirdsTmp.AssignToGPU ( "FBirdsTmp", m_Module );
 		m_Grid.AssignToGPU ( "FGrid", m_Module );		
 		cuCheck ( cuMemcpyHtoD ( m_cuAccel, &m_Accel,	sizeof(Accel) ), "Accel", "cuMemcpyHtoD", "cuAccel", DEBUG_CUDA );
+		cuCheck ( cuMemcpyHtoD ( m_cuParam, &m_Params, sizeof(Params) ), "Params", "cuMemcpyHtoD", "cuParam", DEBUG_CUDA );
 
 		// Commit birds
 		m_Birds.CommitAll ();
@@ -274,7 +308,7 @@ void Sample::Reset (int num )
 
 	}
 
-	printf ( "Added %d birds.\n", m_num_birds );
+	printf ( "Added %d birds.\n", m_Params.num_birds );
 }
 
 
@@ -342,7 +376,7 @@ void Sample::InitializeGrid ()
 	int numElem2 = int ( numElem1 / blockSize ) + 1;
 	int numElem3 = int ( numElem2 / blockSize ) + 1;
 
-	int numPoints = m_num_birds;
+	int numPoints = m_Params.num_birds;
 
 	int mem_usage = (m_gpu) ? DT_CPU | DT_CUMEM : DT_CPU;
 
@@ -373,7 +407,7 @@ void Sample::InitializeGrid ()
 
 void Sample::InsertIntoGrid ()
 {
-	int numPoints = m_num_birds;
+	int numPoints = m_Params.num_birds;
 
 	if (m_gpu) {
 
@@ -408,7 +442,7 @@ void Sample::InsertIntoGrid ()
 
 		Bird* b;
 	
-		for ( int n=0; n < m_num_birds; n++ ) {		
+		for ( int n=0; n < numPoints; n++ ) {		
 		
 			b = (Bird*) m_Birds.GetElem( FBIRD, n);
 			ppos = b->pos;
@@ -480,19 +514,9 @@ void Sample::PrefixSumGrid ()
 		// transfer particle data to temp buffers 
 		//  (required by gpu counting sort algorithm, gpu-to-gpu copy, no sync needed)	
 		m_Birds.CopyAllBuffers ( &m_BirdsTmp, DT_CUMEM );
-
-		m_BirdsTmp.Retrieve (FBIRD);
-		cuCtxSynchronize ();
-		for (int j=0; j < m_num_birds; j++) {						
-			Bird* bj = (Bird*) m_Birds.GetElem ( FBIRD, j );
-			if (bj->id==7) {
-				printf ( "CHK: BIRD %d, #%d\n", bj->id, j  );
-				printf ( "CHK: orientTMP: %f, %f, %f, %f\n", bj->orient.X, bj->orient.Y, bj->orient.Z, bj->orient.W );
-			}
-		}
 		
 		// sort
-		int numPoints = m_num_birds;
+		int numPoints = m_Params.num_birds;
 		void* args[1] = { &numPoints };
 		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_COUNTING_SORT], m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL),
 					"CountingSortFullCUDA", "cuLaunch", "FUNC_COUNTING_SORT", DEBUG_CUDA );
@@ -500,7 +524,7 @@ void Sample::PrefixSumGrid ()
 	} else {
 
 		// PrefixSum - CPU
-		int numPoints = m_num_birds;
+		int numPoints = m_Params.num_birds;
 		int numCells = m_Accel.gridTotal;
 		uint* mgrid = (uint*) m_Grid.bufI(AGRID);
 		uint* mgcnt = (uint*) m_Grid.bufI(AGRIDCNT);
@@ -534,11 +558,12 @@ void Sample::PrefixSumGrid ()
 
 void Sample::FindNeighbors ()
 {
+	
 	if (m_gpu) {
 
 		// Find neighborhood (GPU)
-		//
-		int numPoints = m_num_birds;
+		//		
+		int numPoints = m_Params.num_birds;
 		void* args[1] = { &numPoints };
 		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FIND_NBRS],  m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL), "FindNeighbors", "cuLaunch", "FUNC_FIND_NBRS", DEBUG_CUDA );
 
@@ -576,7 +601,8 @@ void Sample::FindNeighbors ()
 		m_centroid.Set(0,0,0);
 
 		// for each bird..
-		for (int i=0; i < m_num_birds; i++) {
+		int numPoints = m_Params.num_birds;
+		for (int i=0; i < numPoints; i++) {
 
 			bi = (Bird*) m_Birds.GetElem( FBIRD, i);
 			posi = bi->pos;
@@ -667,7 +693,7 @@ void Sample::FindNeighbors ()
 				}
 		}
 
-		m_centroid *= (1.0f / m_num_birds);
+		m_centroid *= (1.0f / numPoints);
 	}
 }
 
@@ -692,7 +718,7 @@ void Sample::DebugBird ( int id, std::string msg )
 		cuCtxSynchronize();
 	}
 	
-	for (n=0; n < m_num_birds; n++) {
+	for (n=0; n < m_Params.num_birds; n++) {
 		b = (Bird*) m_Birds.GetElem (FBIRD, n);
 		if (b->id == id) 
 			break;
@@ -713,8 +739,9 @@ void Sample::Advance ()
 
 		// Advance - GPU
 		//
-		int numPoints = m_num_birds;
-		void* args[4] = { &m_time, &m_DT, &m_Accel.sim_scale, &numPoints };
+		int numPoints = m_Params.num_birds;
+		void* args[4] = { &m_time, &m_Params.DT, &m_Accel.sim_scale, &numPoints };
+
 		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_ADVANCE],  m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL), "Advance", "cuLaunch", "FUNC_ADVANCE", DEBUG_CUDA );
 
 		m_Birds.Retrieve ( FBIRD );
@@ -731,11 +758,6 @@ void Sample::Advance ()
 		Quaternion ctrl_pitch;
 		float airflow, dynamic_pressure, aoa;
 
-		float m_LiftFactor = 0.005;
-		float m_DragFactor = 0.003;
-
-		float mass = 0.1;							// body mass (kg)
-
 		float CL, L, dist, cd, vd;
 		float pitch, yaw;
 		Quaternion ctrlq, tq;
@@ -745,15 +767,11 @@ void Sample::Advance ()
 		bool leader;
 		float ave_yaw;
 
-		float safe_radius = 10.0;		
-
-		Vec3F flock_pnt = m_rnd.randV3(-200, 200);
+		int numPoints = m_Params.num_birds;
 
 		//--- Reynold's behaviors	
-		//
-		
-		/*		
-		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
+		//		
+		for (int n=0; n < numPoints; n++) {
 
 			b = (Bird*) m_Birds.GetElem( FBIRD, n);
 			b->clr.Set(0,0,0,0);
@@ -762,24 +780,16 @@ void Sample::Advance ()
 				continue;		
 			} 		
 
-			diri = b->vel;			diri.Normalize();
-			dirj = b->ave_pos - b->pos; dirj.Normalize();		
-			leader = (diri.Dot (dirj) < 0.4);
-		
-			//dirj *= b->orient.inverse();	
-			//ave_yaw = atan2 ( dirj.z, dirj.x )*RADtoDEG;
-
 			// Turn isolated birds toward flock centroid
-			float d = b->nbr_cnt / 10.0f;
+			float d = b->nbr_cnt / m_Params.border_cnt;
 			if ( d < 1.0 ) { 
 				b->clr.Set(0,1,0, 1);	
 				dirj = m_centroid - b->pos; dirj.Normalize();
 				dirj *= b->orient.inverse();
 				yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 				pitch = asin( dirj.y )*RADtoDEG;
-				b->target.z +=   yaw * 0.01;
-				b->target.y += pitch * 0.01;
-				//continue;
+				b->target.z +=   yaw * m_Params.border_amt;
+				b->target.y += pitch * m_Params.border_amt;				
 			}		
 	
 			// Rule 1. Avoidance - avoid nearest bird
@@ -791,26 +801,29 @@ void Sample::Advance ()
 				dirj = bj->pos - b->pos;
 				dist = dirj.Length();		  
 			
-				if ( dist < safe_radius ) {	
+				if ( dist < m_Params.safe_radius ) {	
 
 					// Angular avoidance			
-					dirj = (dirj/dist) * b->orient.inverse();							
-					float ang_avoid = 0.50;			
+					dirj = (dirj/dist) * b->orient.inverse();													
 					yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
-					pitch = asin( dirj.y )*RADtoDEG;						
-					b->target.z -= yaw * ang_avoid / (dist*dist);
-					b->target.y -= pitch * ang_avoid / (dist*dist);					
+					pitch = asin( dirj.y )*RADtoDEG;		
+					dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));
+					b->target.z -= yaw *		m_Params.avoid_angular_amt / dist;
+					b->target.y -= pitch *  m_Params.avoid_angular_amt / dist;
 
 					// Power adjust				
-					vd = (b->vel.Length() - bj->vel.Length());
-					float np = 3 - vd;
-					b->power = np;
+					L = (b->vel.Length() - bj->vel.Length()) * m_Params.avoid_power_amt;
+					b->power = m_Params.avoid_power_ctr - L;  // * L;				
 
 				}			
 			}
+			
+			if (b->power < m_Params.min_power) b->power = m_Params.min_power;
+			if (b->power > m_Params.max_power) b->power = m_Params.max_power;	
+
 
 			// 1b. Incoming neighbor avoidance
-			if ( b->near_in != -1 ) {
+			/* if ( b->near_in != -1 ) {
 				// get incoming bird
 				bj = (Bird*) m_Birds.GetElem(0, b->near_in);						
 				dirj = bj->pos - b->pos;
@@ -828,11 +841,7 @@ void Sample::Advance ()
 					//b->power = np;			
 				
 				}					
-			}
-
-			if (b->power < -40) b->power = -40;
-			if (b->power > 40) b->power = 40;	
-
+			} */
 
 			// Rule 2. Alignment - orient toward average direction		
 			dirj = b->ave_vel;
@@ -840,8 +849,8 @@ void Sample::Advance ()
 			dirj *= b->orient.inverse();		// using inverse orient for world-to-local xform		
 			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 			pitch = asin( dirj.y )*RADtoDEG;
-			b->target.z += yaw   * 0.050;
-			b->target.y += pitch * 0.050;		 
+			b->target.z += yaw   * m_Params.align_amt;
+			b->target.y += pitch * m_Params.align_amt;		 
 
 			// Rule 3. Cohesion - steer toward neighbor centroid
 			dirj = b->ave_pos - b->pos;
@@ -849,23 +858,25 @@ void Sample::Advance ()
 			dirj *= b->orient.inverse();		// using inverse orient for world-to-local xform		
 			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 			pitch = asin( dirj.y )*RADtoDEG;
-			b->target.z += yaw   * 0.003;
-			b->target.y += pitch * 0.003;		
+			b->target.z += yaw   * m_Params.cohesion_amt;
+			b->target.y += pitch * m_Params.cohesion_amt;		
 		
-		} */
+		}
 		
 
 		//--- Flight model
 		//
-		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
+		for (int n=0; n < numPoints; n++) {
 
 			b = (Bird*) m_Birds.GetElem( FBIRD, n);
 
-			if (b->id==7) {
-				printf ("---- ADVANCE START (CPU), id %d, #%d\n", b->id, n );
-				printf (" orient:  %f, %f, %f, %f\n", b->orient.X, b->orient.Y, b->orient.Z, b->orient.W );		
-				printf (" target:  %f, %f, %f\n", b->target.x, b->target.y, b->target.z );		
-			}
+			#ifdef DEBUG_BIRD
+				if (b->id == DEBUG_BIRD) {
+					printf ("---- ADVANCE START (CPU), id %d, #%d\n", b->id, n );
+					printf (" orient:  %f, %f, %f, %f\n", b->orient.X, b->orient.Y, b->orient.Z, b->orient.W );		
+					printf (" target:  %f, %f, %f\n", b->target.x, b->target.y, b->target.z );		
+				}
+			#endif
 			
 			// Body orientation
 			fwd = Vec3F(1,0,0) * b->orient;			// X-axis is body forward
@@ -875,8 +886,8 @@ void Sample::Advance ()
 			// Direction of motion
 			b->speed = b->vel.Length();
 			vaxis = b->vel / b->speed;	
-			if ( b->speed < m_min_speed ) b->speed = m_min_speed;				// birds dont go in reverse
-			if ( b->speed > m_max_speed ) b->speed = m_max_speed;
+			if ( b->speed < m_Params.min_speed ) b->speed = m_Params.min_speed;				// birds dont go in reverse
+			if ( b->speed > m_Params.max_speed ) b->speed = m_Params.max_speed;
 			if ( b->speed==0) vaxis = fwd;
 			
 			b->orient.toEuler ( angs );			
@@ -885,24 +896,21 @@ void Sample::Advance ()
 			angs.z = fmod (angs.z, 180.0 );												
 			b->target.z = fmod ( b->target.z, 180 );										// yaw -180/180
 			b->target.x = circleDelta(b->target.z, angs.z) * 0.5;				// banking
-			b->target.y *= 0.999;																				// level out
-			if ( b->target.y > 40 ) b->target.y = 40;
-			if ( b->target.y < -40 ) b->target.y = -40;
+			b->target.y *= m_Params.pitch_decay;																				// level out
+			if ( b->target.y < m_Params.pitch_min ) b->target.y = m_Params.pitch_min;
+			if ( b->target.y > m_Params.pitch_max ) b->target.y = m_Params.pitch_max;
 			if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
 		
-			float reaction_delay = 0.0005;
-			//float reaction_delay = 0.0010;
-
 			// Roll - Control input
 			// - orient the body by roll
-			ctrlq.fromAngleAxis ( (b->target.x - angs.x) * reaction_delay, fwd );
+			ctrlq.fromAngleAxis ( (b->target.x - angs.x) * m_Params.reaction_delay, fwd );
 			b->orient *= ctrlq;	b->orient.normalize();
 
 			// Pitch & Yaw - Control inputs
 			// - apply 'torque' by rotating the velocity vector based on pitch & yaw inputs				
-			ctrlq.fromAngleAxis ( circleDelta(b->target.z, angs.z) * reaction_delay, up * -1.f );
+			ctrlq.fromAngleAxis ( circleDelta(b->target.z, angs.z) * m_Params.reaction_delay, up * -1.f );
 			vaxis *= ctrlq; vaxis.Normalize();	
-			ctrlq.fromAngleAxis ( (b->target.y - angs.y) * reaction_delay, right );
+			ctrlq.fromAngleAxis ( (b->target.y - angs.y) * m_Params.reaction_delay, right );
 			vaxis *= ctrlq; vaxis.Normalize();
 
 			// Adjust velocity vector
@@ -910,20 +918,19 @@ void Sample::Advance ()
 			force = 0;
 
 			// Dynamic pressure		
-			airflow = b->speed + m_wind.Dot ( fwd*-1.0f );		// airflow = air over wing due to speed + external wind
-			float p = 1.225;																	// air density, kg/m^3
-			float dynamic_pressure = 0.5f * p * airflow * airflow;
+			airflow = b->speed + m_Params.wind.Dot ( fwd*-1.0f );		// airflow = air over wing due to speed + external wind			
+			float dynamic_pressure = 0.5f * m_Params.air_density * airflow * airflow;
 
 			// Lift force
 			aoa = acos( fwd.Dot( vaxis ) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  			if (isnan(aoa)) aoa = 1;
 			// CL = sin(aoa * 0.2) = coeff of lift, approximate CL curve with sin
-			L = sin( aoa * 0.2) * dynamic_pressure * m_LiftFactor * 0.5;		// lift equation. L = CL (1/2 p v^2) A
+			L = sin( aoa * 0.2) * dynamic_pressure * m_Params.lift_factor * 0.5;		// lift equation. L = CL (1/2 p v^2) A
 			lift = up * L;
 			force += lift;	
 
 			// Drag force	
-			drag = vaxis * dynamic_pressure * m_DragFactor * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
+			drag = vaxis * dynamic_pressure * m_Params.drag_factor  * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
 			force += drag; 
 
 			// Thrust force
@@ -931,25 +938,13 @@ void Sample::Advance ()
 			force += thrust;
 	
 			// Integrate position		
-			accel = force / mass;				// body forces	
-			accel += Vec3F(0,-9.8,0);	// gravity
-			accel += m_wind * p * 0.1f;		// wind force. Fw = w^2 p * A, where w=wind speed, p=air density, A=frontal area
+			accel = force / m_Params.mass;				// body forces	
+			accel += m_Params.gravity;						// gravity
+			accel += m_Params.wind * m_Params.air_density * m_Params.front_area;		// wind force. Fw = w^2 p * A, where w=wind speed, p=air density, A=frontal area
 	
-			b->pos += b->vel * m_DT;
-
-			float cd;	
+			b->pos += b->vel * m_Params.DT;
 
 			// Boundaries
-			/*if ( b->pos.x < m_Accel.bound_min.x ) b->target.z = 0;
-			if ( b->pos.x > m_Accel.bound_max.x ) b->target.z = 179;
-			if ( b->pos.z < m_Accel.bound_min.z ) b->target.z = 90;
-			if ( b->pos.z > m_Accel.bound_max.z ) b->target.z = -90;*/
-
-			/*Vec3F pr ( b->pos.x, 0, b->pos.z );
-			f ( pr.Length() > m_Accel.bound_max.x ) {
-				b->target.z += 0.5;  //= fmod( atan2( -pr.z, -pr.x ) * RADtoDEG, 180 );
-			}*/
-		
 			if ( b->pos.x < m_Accel.bound_min.x ) b->pos.x = m_Accel.bound_max.x;
 			if ( b->pos.x > m_Accel.bound_max.x ) b->pos.x = m_Accel.bound_min.x;
 			if ( b->pos.z < m_Accel.bound_min.z ) b->pos.z = m_Accel.bound_max.z;
@@ -957,22 +952,18 @@ void Sample::Advance ()
 
 			// Ground avoidance
 			L = b->pos.y - m_Accel.bound_min.y;
-			if ( L < 50 ) {			
-				L = (50-L)/50.0f;
-				b->target.y += L * 0.5;			
-				b->power = 4;
+			if ( L < m_Params.bound_soften ) {			
+				L = (m_Params.bound_soften - L) / m_Params.bound_soften;
+				b->target.y += L * m_Params.avoid_ground_amt;			
+				b->power = m_Params.avoid_ground_power;
 			} 
 		
 			// Ceiling avoidance
-			cd = m_Accel.bound_max.y - b->pos.y;
-			if ( cd < 50  ) {	
-				cd = (50-cd)/50.0f;									
-				b->target.y -= cd * 0.1; 						
+			L = m_Accel.bound_max.y - b->pos.y;
+			if ( L < m_Params.bound_soften  ) {	
+				L = (m_Params.bound_soften - L) / m_Params.bound_soften;
+				b->target.y -= L * m_Params.avoid_ceil_amt; 						
 			} 
-
-			/*if (b->nbr_cnt==0) {						
-				b->target.z = fmod( atan2( b->pos.z , b->pos.x ) * RADtoDEG + 180, 180 );			
-			}*/
 
 			// Ground condition
 			if (b->pos.y <= 0.00001 ) { 
@@ -984,7 +975,7 @@ void Sample::Advance ()
 			} 
 	
 			// Integrate velocity
-			b->vel += accel * m_DT;		
+			b->vel += accel * m_Params.DT;		
 
 			vaxis = b->vel;	vaxis.Normalize ();
 
@@ -994,44 +985,64 @@ void Sample::Advance ()
 			// this is an assumption yet much simpler/faster than integrating body orientation
 			// this way we dont need torque, angular vel, or rotational inertia.
 			// stalls are possible but not flat spins or 3D flying		
-			angvel.fromRotationFromTo ( fwd, vaxis, .1 );
+			angvel.fromRotationFromTo ( fwd, vaxis, m_Params.dynamic_stability );
 			if ( !isnan(angvel.X) ) {
 				b->orient *= angvel;
 				b->orient.normalize();			
 			}
 
-			if (b->id==7) {
-				printf ("---- ADVANCE (CPU), id %d, #d\n", b->id, n );
-				printf (" speed:   %f\n", b->speed );
-				printf (" airflow: %f\n", airflow );
-				printf (" orients: %f, %f, %f, %f\n", b->orient.X, b->orient.Y, b->orient.Z, b->orient.W );		
-				printf (" angs:    %f, %f, %f\n", angs.x, angs.y, angs.z );		
-				printf (" target:  %f, %f, %f\n", b->target.x, b->target.y, b->target.z );				
-				
-			}
+			#ifdef DEBUG_BIRD
+				if (b->id == DEBUG_BIRD) {
+					printf ("---- ADVANCE (CPU), id %d, #d\n", b->id, n );
+					printf (" speed:   %f\n", b->speed );
+					printf (" airflow: %f\n", airflow );
+					printf (" orients: %f, %f, %f, %f\n", b->orient.X, b->orient.Y, b->orient.Z, b->orient.W );		
+					printf (" angs:    %f, %f, %f\n", angs.x, angs.y, angs.z );		
+					printf (" target:  %f, %f, %f\n", b->target.x, b->target.y, b->target.z );								
+				}
+			#endif
 		}
 	}
 
 	
 }
 
+// Run
+// run a single time step
+//
 void Sample::Run ()
 {
+	// PERF_PUSH ( "Run" );
+
+	TimeX t1, t2;
+	t1.SetTimeNSec();
+
 	#ifdef DEBUG_BIRD
 		DebugBird ( DEBUG_BIRD, "Start" );
 	#endif
 
+	//--- Insert birds into acceleration grid
 	InsertIntoGrid ();
 
+	//--- Prefix scan for accel grid
 	PrefixSumGrid ();
 
+	//--- Find neighbors
 	FindNeighbors ();
 
+	//--- Advance birds with behaviors & flight model
 	Advance ();		
 
 	#ifdef DEBUG_BIRD
 		DebugBird ( 7, "Post-Advance" );
 	#endif
+
+	// computation timing
+	t2.SetTimeNSec();
+	float msec = t2.GetElapsedMSec( t1 );
+	printf ( "Run: %f msec/step\n", msec );
+
+	// PERF_POP();
 
 	m_time++;
 }
@@ -1097,6 +1108,10 @@ void Sample::CameraToCockpit(int n )
 bool Sample::init ()
 {
 	int w = getWidth(), h = getHeight();			// window width &f height
+
+	appSetVSync( false );
+
+	PERF_INIT ( 64, false, true, false, 0, "");
 	
 	m_run = true;	
 	m_cockpit_view = false;
@@ -1108,7 +1123,7 @@ bool Sample::init ()
 	m_rnd.seed (12);
 	
 	//m_gpu = false;
-	m_gpu = true;
+	 m_gpu = true;
 
 	m_kernels_loaded = false;
 
@@ -1126,7 +1141,9 @@ bool Sample::init ()
 
 	// Initialize flock simulation
 	// 
-  // Reset ( 2400 );
+  
+	DefaultParams ();
+
 	Reset ( 10000 );
 
 
@@ -1215,10 +1232,10 @@ void Sample::display ()
 			if ( m_draw_vis ) {
 				
 				// visualize velocity
-				float v = (b->vel.Length() - m_min_speed) / (m_max_speed-m_min_speed);			
-				float v2 = (b->power + 3)/10.f;
+				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);			
+				float v2 = (b->power - m_Params.avoid_power_ctr + 20) / 40.0f;
 				if (b->clr.w==0) {
-					drawLine3D ( b->pos,		b->pos + (b->vel*0.05f),	Vec4F(v2, 0, 1-v2,1) );
+					drawLine3D ( b->pos,		b->pos + (b->vel*0.05f),	Vec4F(v2, 1-v2, 1-v2,1) );
 				} else {
 					drawLine3D ( b->pos,		b->pos + (b->vel*0.05f),	b->clr );
 				}
@@ -1333,7 +1350,7 @@ void Sample::keyboard(int keycode, AppEnum action, int mods, int x, int y)
 		m_cockpit_view = !m_cockpit_view; 
 		//m_cam_orient = 
 		break;
-	case 'r': Reset( m_num_birds ); break;
+	case 'r': Reset( m_Params.num_birds ); break;
 	case ' ':	m_run = !m_run;	break;	
 	case 'z': 
 		m_bird_sel--; 
@@ -1361,7 +1378,7 @@ void Sample::reshape (int w, int h)
 void Sample::startup ()
 {
 	int w = 1900, h = 1000;
-	appStart ( "Flock v2 (c) Rama Karl 2023, MIT license", "Flock v2", w, h, 4, 2, 16, false );
+	appStart ( "Flock v2 (c) Rama Karl 2023, MIT license", "Flock v2", w, h, 4, 2, 16, false );	
 }
 
 void Sample::shutdown()

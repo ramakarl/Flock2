@@ -48,6 +48,7 @@
 
 
 	// *NOTE*
+	// Bird structure used for both CPU and GPU.
   // For GPU, a struct must follow memory alignment rules.
   // This includes each 4-component member var (float4, quat4) must have 128-bit alignment.
   // So we arrange those in the struct first, and ensure other align to 128-bits (16 bytes).
@@ -78,6 +79,39 @@
 		int			numThreads, numBlocks;
 		int			gridThreads, gridBlocks;	
 		int			szPnts;
+	};
+
+	struct ALIGN(32) Params {
+	
+		int			num_birds;
+		float		DT;
+		float		mass;
+		float		min_speed, max_speed;
+		float		min_power, max_power;
+		float		fov, fovcos;
+		float		lift_factor;
+		float		drag_factor;
+		float		safe_radius;
+		float		border_cnt;
+		float		border_amt;
+		float		avoid_angular_amt;
+		float		avoid_power_amt;
+		float		avoid_power_ctr;
+		float		align_amt;
+		float		cohesion_amt;
+		float		pitch_decay;
+		float		pitch_min, pitch_max;
+		float		reaction_delay;
+		float		dynamic_stability;
+		float		air_density;		
+		float		front_area;
+		float		bound_soften;
+		float		avoid_ground_amt;
+		float		avoid_ground_power;
+		float		avoid_ceil_amt;
+		
+		f3			gravity;
+		f3			wind;
 	};
 
 #endif
