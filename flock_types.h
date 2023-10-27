@@ -83,6 +83,7 @@
 
 	struct ALIGN(32) Params {
 	
+		int			steps;
 		int			num_birds;
 		float		DT;
 		float		mass;

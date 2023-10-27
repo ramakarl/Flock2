@@ -204,14 +204,15 @@ void Sample::DefaultParams ()
 	// SI units:
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
-	m_Params.DT =								0.002;									// timestep (sec), .005 = 200 hz
+	m_Params.steps =						2;
+	m_Params.DT =								0.004;									// timestep (sec), .005 = 200 hz
 	m_Params.mass =							0.1;										// bird mass (kg)
 	m_Params.min_speed =				5;											// min speed (m/s)
 	m_Params.max_speed =				10;											// max speed (m/s)
 	m_Params.min_power =				-20;										// min power (N)
 	m_Params.max_power =				20;											// max power (N)
 	m_Params.wind =							Vec3F(0,0,0);						// wind direction & strength
-	m_Params.fov =							135;										// bird field-of-view (degrees)
+	m_Params.fov =							130;										// bird field-of-view (degrees)
 	m_Params.fovcos = cos ( m_Params.fov * DEGtoRAD );
 
 	m_Params.lift_factor =			0.100;									// lift factor
@@ -220,18 +221,18 @@ void Sample::DefaultParams ()
 	m_Params.border_cnt =				20;											// border width (# birds)
 	m_Params.border_amt =				0.04f;								 	// border steering amount (keep <0.1)
 	
-	m_Params.avoid_angular_amt= 0.01f;									// bird angular avoidance amount
-	m_Params.avoid_power_amt =	2.0f;								 		// power avoidance amount (N)
+	m_Params.avoid_angular_amt= 0.02f;									// bird angular avoidance amount
+	m_Params.avoid_power_amt =	4.0f;								 		// power avoidance amount (N)
 	m_Params.avoid_power_ctr =	3;											// power avoidance center (N)
 	
-	m_Params.align_amt =				0.300f;									// bird alignment amount
+	m_Params.align_amt =				0.400f;									// bird alignment amount
 
 	m_Params.cohesion_amt =			0.001f;									// bird cohesion amount
 
 	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
 	m_Params.pitch_max =				40;											// max pitch (degrees)
-	m_Params.reaction_delay =		0.0004f;								// reaction delay
+	m_Params.reaction_delay =		0.0006f;								// reaction delay
 	m_Params.dynamic_stability = 0.5f;									// dyanmic stability factor
 	m_Params.air_density =			1.225;									// air density (kg/m^3)
 	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
@@ -300,7 +301,7 @@ void Sample::Reset (int num )
 	//
 	m_Accel.bound_min = Vec3F(-100,   0, -100);
 	m_Accel.bound_max = Vec3F( 100, 100,  100);
-	m_Accel.psmoothradius = 4;
+	m_Accel.psmoothradius = 6;
 	m_Accel.grid_density = 1.0;
 	m_Accel.sim_scale = 1.0;
 
@@ -1315,7 +1316,7 @@ bool Sample::init ()
   
 	DefaultParams ();
 
-	Reset ( 40000 );
+	Reset ( 20000 );
 
 
 	// Camera
@@ -1323,6 +1324,11 @@ bool Sample::init ()
 	m_cam->setFov ( 70 );
 	m_cam->setNearFar ( 1.0, 100000 );
 	m_cam->SetOrbit ( Vec3F(-30,30,0), Vec3F(0,50,0), 100, 1 );
+
+	// Background (static)
+	start2D( w, h, true );	
+	drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
+	end2D();
 
 	return true;
 }
@@ -1342,7 +1348,7 @@ void Sample::display ()
 	// Advance simulation
 	if (m_run) { 		
 
-		for (int i=0; i < 5; i++)
+		for (int i=0; i < m_Params.steps; i++)
 			Run ();
 	}	
 
