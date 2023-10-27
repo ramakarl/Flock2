@@ -222,7 +222,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	
 	ctrlq = quat_inverse ( b->orient );
 
-  float3 centroid = make_float3(0,100,0);
+  float3 centroid = make_float3(0,50,0);
 
 	// Turn isolated birds toward flock centroid
 	float d = b->nbr_cnt / FParams.border_cnt;

@@ -204,7 +204,7 @@ void Sample::DefaultParams ()
 	// SI units:
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
-	m_Params.DT =								0.005;									// timestep (sec), .005 = 200 hz
+	m_Params.DT =								0.002;									// timestep (sec), .005 = 200 hz
 	m_Params.mass =							0.1;										// bird mass (kg)
 	m_Params.min_speed =				5;											// min speed (m/s)
 	m_Params.max_speed =				10;											// max speed (m/s)
@@ -216,33 +216,30 @@ void Sample::DefaultParams ()
 
 	m_Params.lift_factor =			0.100;									// lift factor
 	m_Params.drag_factor =			0.002;									// drag factor
-	m_Params.safe_radius =			10;											// radius of avoidance
+	m_Params.safe_radius =			1.5;										// radius of avoidance (m)
 	m_Params.border_cnt =				20;											// border width (# birds)
 	m_Params.border_amt =				0.04f;								 	// border steering amount (keep <0.1)
 	
-	m_Params.avoid_angular_amt= 0.05f;									// bird angular avoidance amount
-	m_Params.avoid_power_amt =	5.0f;								 		// bird power avoidance amount
-	m_Params.avoid_power_ctr =	3;											// bird power avoidance center setting (neutral power)
+	m_Params.avoid_angular_amt= 0.01f;									// bird angular avoidance amount
+	m_Params.avoid_power_amt =	2.0f;								 		// power avoidance amount (N)
+	m_Params.avoid_power_ctr =	3;											// power avoidance center (N)
 	
-	m_Params.align_amt =				0.400f;									// bird alignment amount
+	m_Params.align_amt =				0.300f;									// bird alignment amount
 
-	m_Params.cohesion_amt =			0.002f;									// bird cohesion amount
+	m_Params.cohesion_amt =			0.001f;									// bird cohesion amount
 
 	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
 	m_Params.pitch_max =				40;											// max pitch (degrees)
-	m_Params.reaction_delay =		0.00025f;								// reaction delay
+	m_Params.reaction_delay =		0.0004f;								// reaction delay
 	m_Params.dynamic_stability = 0.5f;									// dyanmic stability factor
 	m_Params.air_density =			1.225;									// air density (kg/m^3)
 	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
 	m_Params.front_area =				0.1f;										// section area of bird into wind
-	m_Params.bound_soften	=			50;											// ground detection range
+	m_Params.bound_soften	=			20;											// ground detection range
 	m_Params.avoid_ground_power = 3;										// ground avoid power setting 
 	m_Params.avoid_ground_amt = 0.5f;										// ground avoid strength
 	m_Params.avoid_ceil_amt =   0.1f;										// ceiling avoid strength
-
-	// reaction times:
-	// measured starling reaction time = 76 msec = 13 hz (Pomeroy and Heppner 1977)
 	
 }
 
@@ -289,7 +286,8 @@ void Sample::Reset (int num )
 		} */
 		
 		// randomly distribute birds
-		pos = m_rnd.randV3( -100, 100 ) + Vec3F(0, 100, 0);
+		pos = m_rnd.randV3( -100, 100 );
+		pos.y = pos.y * .5f + 50;
 		vel = m_rnd.randV3( -20, 20 );
 		h = m_rnd.randF(-180, 180);
 		b = AddBird ( pos, vel, Vec3F(0, 0, h), 3); 
@@ -300,9 +298,9 @@ void Sample::Reset (int num )
 	
 	// Initialize accel grid
 	//
-	m_Accel.bound_min = Vec3F(-200,   0, -200);
-	m_Accel.bound_max = Vec3F( 200, 200,  200);
-	m_Accel.psmoothradius = 15;
+	m_Accel.bound_min = Vec3F(-100,   0, -100);
+	m_Accel.bound_max = Vec3F( 100, 100,  100);
+	m_Accel.psmoothradius = 4;
 	m_Accel.grid_density = 1.0;
 	m_Accel.sim_scale = 1.0;
 
@@ -842,8 +840,8 @@ void Sample::Advance ()
 					yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 					pitch = asin( dirj.y )*RADtoDEG;		
 					dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));
-					b->target.z -= yaw *		m_Params.avoid_angular_amt / dist;
-					b->target.y -= pitch *  m_Params.avoid_angular_amt / dist;
+					b->target.z -= yaw *		m_Params.avoid_angular_amt * m_Params.DT / dist;
+					b->target.y -= pitch *  m_Params.avoid_angular_amt * m_Params.DT / dist;
 
 					// Power adjust				
 					L = (b->vel.Length() - bj->vel.Length()) * m_Params.avoid_power_amt;
@@ -1144,9 +1142,10 @@ void Sample::VisualizeSelectedBird ()
 		int gc = m_Birds.bufUI(FGCELL)[ ndx ];
 		if ( gc != GRID_UNDEF ) {			
 			Bird* bj;
-			float dsq;
+			float dsq, ave_dist = 0;
 			Vec3F dist;
-			uint j, cell;					
+			uint j, cell, ncnt = 0;			
+
 			// find neighbors
 			float rd2 = (m_Accel.psmoothradius*m_Accel.psmoothradius) / (m_Accel.sim_scale * m_Accel.sim_scale);
 			gc -= (m_Accel.gridRes.z + 1)*m_Accel.gridRes.x + 1;
@@ -1161,11 +1160,18 @@ void Sample::VisualizeSelectedBird ()
 						dist = b->pos - bj->pos;
 						dsq = (dist.x*dist.x + dist.y*dist.y + dist.z*dist.z);
 						if ( dsq < rd2 ) {							
+							ave_dist += sqrt( dsq );
+							ncnt++;
 							m_vis.push_back ( vis_t( bj->pos, 1.1f, Vec4F(1,1,0,1) ) );		// neighbor birds (yellow)
 						}
 				}
 			}
+			if ( ncnt > 0) {
+				ave_dist /= ncnt;
+				printf ( "ave dist: %f\n", ave_dist );
+			}
 		}					
+
 	}
 }
 
@@ -1309,14 +1315,14 @@ bool Sample::init ()
   
 	DefaultParams ();
 
-	Reset ( 10000 );
+	Reset ( 40000 );
 
 
 	// Camera
 	m_cam = new Camera3D;
-	m_cam->setFov ( 120 );
+	m_cam->setFov ( 70 );
 	m_cam->setNearFar ( 1.0, 100000 );
-	m_cam->SetOrbit ( Vec3F(-30,30,0), Vec3F(0,100,0), 300, 1 );
+	m_cam->SetOrbit ( Vec3F(-30,30,0), Vec3F(0,50,0), 100, 1 );
 
 	return true;
 }
@@ -1412,9 +1418,9 @@ void Sample::display ()
 				y = Vec3F(0,1,0) * b->orient;
 				z = Vec3F(0,0,1) * b->orient;
 				Vec3F p,q,r,t;
-				p = b->pos - z*1.0f;
-				q = b->pos + z*1.0f;
-				r = b->pos + x*2.0f; 
+				p = b->pos - z * 0.2f;   // wingspan = 40 cm = 0.2m (per wing)
+				q = b->pos + z * 0.2f;
+				r = b->pos + x * 0.22f;   // length = 22 cm = 0.22m
 				t = y;				
 				drawTri3D ( p, q, r, t, Vec4F(1,1,1,1) );
 			}
