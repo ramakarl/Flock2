@@ -89,6 +89,7 @@ public:
 	void			CameraToBird ( int b );
 	void			CameraToCockpit( int b );
 	void			CameraToCentroid ();
+	void			SetBackground();
 	void			drawGrid( Vec4F clr );
 
 	// acceleration
@@ -204,11 +205,11 @@ void Sample::DefaultParams ()
 	// SI units:
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
-	m_Params.steps =						2;
-	m_Params.DT =								0.004;									// timestep (sec), .005 = 200 hz
+	m_Params.steps =						4;
+	m_Params.DT =								0.002;									// timestep (sec), .005 = 200 hz
 	m_Params.mass =							0.1;										// bird mass (kg)
 	m_Params.min_speed =				5;											// min speed (m/s)
-	m_Params.max_speed =				10;											// max speed (m/s)
+	m_Params.max_speed =				18;											// max speed (m/s)
 	m_Params.min_power =				-20;										// min power (N)
 	m_Params.max_power =				20;											// max power (N)
 	m_Params.wind =							Vec3F(0,0,0);						// wind direction & strength
@@ -222,12 +223,12 @@ void Sample::DefaultParams ()
 	m_Params.border_amt =				0.04f;								 	// border steering amount (keep <0.1)
 	
 	m_Params.avoid_angular_amt= 0.02f;									// bird angular avoidance amount
-	m_Params.avoid_power_amt =	4.0f;								 		// power avoidance amount (N)
+	m_Params.avoid_power_amt =	25.0f;								 		// power avoidance amount (N)
 	m_Params.avoid_power_ctr =	3;											// power avoidance center (N)
 	
 	m_Params.align_amt =				0.400f;									// bird alignment amount
 
-	m_Params.cohesion_amt =			0.001f;									// bird cohesion amount
+	m_Params.cohesion_amt =			0.0005f;								// bird cohesion amount
 
 	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
@@ -1210,7 +1211,7 @@ void Sample::Run ()
 	// computation timing
 	t2.SetTimeNSec();
 	float msec = t2.GetElapsedMSec( t1 );
-	printf ( "Run: %f msec/step\n", msec );
+	printf ( "Run: %f msec/step, %2.2f%% real-time\n", msec, (m_Params.DT*1000.0)*100 / msec );
 
 	// PERF_POP();
 
@@ -1326,13 +1327,26 @@ bool Sample::init ()
 	m_cam->SetOrbit ( Vec3F(-30,30,0), Vec3F(0,50,0), 100, 1 );
 
 	// Background (static)
-	start2D( w, h, true );	
-	drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
-	end2D();
+	SetBackground ();
 
 	return true;
 }
 
+
+void Sample::SetBackground ()
+{
+	int w = getWidth(), h = getHeight();
+	clear2D();
+	start2D( w, h, true );	
+	if ( m_draw_vis ) {
+		// black background for vis
+		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(0,0,0,1) );
+	} else {
+		// realistic sky
+		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
+	}
+	end2D();
+}
 
 void Sample::display ()
 {	
@@ -1411,7 +1425,7 @@ void Sample::display ()
 				
 				// visualize velocity
 				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);			
-				float v2 = (b->power + 3) / 6.0f;
+				float v2 = (b->power - 2);
 				if (b->clr.w==0) {
 					drawLine3D ( b->pos,		b->pos + (b->vel*0.05f),	Vec4F(v2, 1-v2, 1-v2,1) );
 				} else {
@@ -1451,6 +1465,8 @@ void Sample::display ()
 			drawText ( Vec2F(10, 30), msg, Vec4F(1,1,1,1) );
 			sprintf ( msg, "vel: %f %f %f = %f\n", bsel->vel.x, bsel->vel.y, bsel->vel.z, bsel->vel.Length() );
 			drawText ( Vec2F(10, 50), msg, Vec4F(1,1,1,1) );
+			sprintf ( msg, "power: %f\n", bsel->power );
+			drawText ( Vec2F(10, 70), msg, Vec4F(1,1,1,1) );
 			
 		
 			// Graph selected bird 
@@ -1543,7 +1559,10 @@ void Sample::keyboard(int keycode, AppEnum action, int mods, int x, int y)
 		return;
 
 	switch ( keycode ) {
-	case 'v': m_draw_vis = !m_draw_vis; break;
+	case 'v': 
+		m_draw_vis = !m_draw_vis;
+		SetBackground();
+		break;
 	case 's': m_draw_sphere = !m_draw_sphere; break;
 	case 'g': m_draw_grid = !m_draw_grid; break;
   case 'c': 		
