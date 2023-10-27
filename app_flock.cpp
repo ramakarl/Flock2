@@ -219,7 +219,7 @@ void Sample::DefaultParams ()
 	m_Params.lift_factor =			0.100;									// lift factor
 	m_Params.drag_factor =			0.002;									// drag factor
 	m_Params.safe_radius =			1.5;										// radius of avoidance (m)
-	m_Params.border_cnt =				20;											// border width (# birds)
+	m_Params.border_cnt =				30;											// border width (# birds)
 	m_Params.border_amt =				0.04f;								 	// border steering amount (keep <0.1)
 	
 	m_Params.avoid_angular_amt= 0.02f;									// bird angular avoidance amount
@@ -234,7 +234,7 @@ void Sample::DefaultParams ()
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
 	m_Params.pitch_max =				40;											// max pitch (degrees)
 	m_Params.reaction_delay =		0.0006f;								// reaction delay
-	m_Params.dynamic_stability = 0.5f;									// dyanmic stability factor
+	m_Params.dynamic_stability = 0.6f;									// dyanmic stability factor
 	m_Params.air_density =			1.225;									// air density (kg/m^3)
 	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
 	m_Params.front_area =				0.1f;										// section area of bird into wind
@@ -1253,8 +1253,16 @@ void Sample::CameraToBird ( int n )
 
 void Sample::CameraToCentroid ( )
 {
-	if (!m_cam_adjust)
+	m_centroid = 0;
+	for (int n=0; n < m_Params.num_birds; n++) {
+		Bird* b = (Bird*) m_Birds.GetElem( FBIRD, n );
+		m_centroid += b->pos;
+	}
+	m_centroid *= (1.0 / m_Params.num_birds);
+
+	if (!m_cam_adjust) {
 		m_cam->setDirection ( m_cam->getPos(), m_centroid, 0 );
+	}
 }
 
 void Sample::CameraToCockpit(int n )
@@ -1370,7 +1378,7 @@ void Sample::display ()
 	VisualizeSelectedBird ();
 
 
-	//CameraToCentroid ();
+	// CameraToCentroid ();
 
 	/*if (m_cockpit_view) {
 		CameraToCockpit ( m_bird_sel);
@@ -1521,7 +1529,7 @@ void Sample::motion (AppEnum button, int x, int y, int dx, int dy)
 		} break;
 
 	case AppEnum::BUTTON_MIDDLE: {
-		// Adjust target pos		
+		// Adjust target pos				
 		float zoom = (m_cam->getOrbitDist() - m_cam->getDolly()) * 0.0003f;
 		m_cam->moveRelative ( float(dx) * zoom, float(-dy) * zoom, 0 );	
 		m_cam_adjust = true;
@@ -1530,10 +1538,15 @@ void Sample::motion (AppEnum button, int x, int y, int dx, int dy)
 	case AppEnum::BUTTON_RIGHT: {
 		// Adjust orbit angles
 		Vec3F angs = m_cam->getAng();
-		angs.x += dx*0.2f;
-		angs.y -= dy*0.2f;				
-		m_cam->SetOrbit ( angs, m_cam->getToPos(), m_cam->getOrbitDist(), m_cam->getDolly() );
-		m_cam_adjust = true;
+		if (m_draw_vis) { 			
+			angs.x += dx*0.2f;
+			angs.y -= dy*0.2f;				
+			m_cam->SetOrbit ( angs, m_cam->getToPos(), m_cam->getOrbitDist(), m_cam->getDolly() );			
+		} else {		
+			angs.x += dx*0.02f;
+			angs.y -= dy*0.02f;				
+			m_cam->setAngles ( angs.x, angs.y, angs.z );		}
+			m_cam_adjust = true;
 		} break;	
 	}
 }
@@ -1544,10 +1557,11 @@ void Sample::mousewheel(int delta)
 	float zoomamt = 1.0;
 	float dist = m_cam->getOrbitDist();
 	float dolly = m_cam->getDolly();
-	float zoom = (dist - dolly) * 0.001f;
+	float zoom = (dist - dolly) * 0.0005f;
 	dist -= delta * zoom * zoomamt;
 	
 	m_cam->SetOrbit(m_cam->getAng(), m_cam->getToPos(), dist, dolly);		
+	m_cam_adjust = true;
 }
 
 
