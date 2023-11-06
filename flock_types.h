@@ -59,7 +59,7 @@
 		f4			clr;
 
 		f3			pos, vel, accel, target;
-		f3			ave_pos, ave_vel;
+		f3			ave_pos, ave_vel, ang_accel;
 		
 		float		speed, pitch_adv, power;	
 		int			id, near_j, nbr_cnt;		

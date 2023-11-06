@@ -227,7 +227,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	// Turn isolated birds toward flock centroid
 	float d = b->nbr_cnt / FParams.border_cnt;
 	if ( d < 1.0 ) { 
-		b->clr = make_float4(0, 1, 0, 1);	
+		b->clr = make_float4(1, .5, 0, 1);	
 		dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 		pitch = asin( dirj.y )*RADtoDEG;
@@ -256,13 +256,14 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 				dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));				
 				b->target.z -= yaw *	 FParams.avoid_angular_amt / dist;
 				b->target.y -= pitch * FParams.avoid_angular_amt / dist;
-
-				// Power adjust
-				L = (length(b->vel) - length(bj->vel)) * FParams.avoid_power_amt;
-				b->power = FParams.avoid_power_ctr - L; // * L;
-
 			}
+
+			// Power adjust
+			L = length(b->vel - bj->vel) * FParams.avoid_power_amt;			
+			b->power = FParams.avoid_power_ctr - L * L;
+
 		}
+
 		if (b->power < FParams.min_power) b->power = FParams.min_power;
 		if (b->power > FParams.max_power) b->power = FParams.max_power;	
 
@@ -282,7 +283,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 		b->target.z += yaw   * FParams.cohesion_amt;
 		b->target.y += pitch * FParams.cohesion_amt; 		
 		 
-	}
+	}	
 
 	//-------------- FLIGHT MODEL
 
@@ -309,16 +310,22 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	if ( b->target.y > FParams.pitch_max ) b->target.y = FParams.pitch_max;	
 	if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
 
+	// Compute angular acceleration
+	// - as difference between current direction and desired direction
+	b->ang_accel.x = (b->target.x - angs.x);
+	b->ang_accel.y = (b->target.y - angs.y);
+	b->ang_accel.z = circleDelta(b->target.z, angs.z);
+
 	// Roll - Control input
 	// - orient the body by roll
-	ctrlq = quat_from_angleaxis ( (b->target.x - angs.x) * FParams.reaction_delay, fwd );
+	ctrlq = quat_from_angleaxis ( b->ang_accel.x * FParams.reaction_delay, fwd );
 	b->orient = quat_normalize ( quat_mult ( b->orient, ctrlq ) );
 
 	// Pitch & Yaw - Control inputs
-	// - apply 'torque' by rotating the velocity vector based on pitch & yaw inputs				
-	ctrlq = quat_from_angleaxis ( circleDelta(b->target.z, angs.z) * FParams.reaction_delay, up * -1.f );
+	// - apply 'torque' by rotating the velocity vector based on pitch & yaw inputs						
+	ctrlq = quat_from_angleaxis ( b->ang_accel.z * FParams.reaction_delay, up * -1.f );
 	vaxis = normalize ( quat_mult ( vaxis, ctrlq ) ); 
-	ctrlq = quat_from_angleaxis ( (b->target.y - angs.y) * FParams.reaction_delay, right );
+	ctrlq = quat_from_angleaxis ( b->ang_accel.y * FParams.reaction_delay, right );
 	vaxis = normalize ( quat_mult ( vaxis, ctrlq ) );
 
 	// Adjust velocity vector
@@ -363,7 +370,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	if ( L < FParams.bound_soften ) {			
 		L = (FParams.bound_soften - L) / FParams.bound_soften;
 		b->target.y += L * FParams.avoid_ground_amt;
-		b->power = FParams.avoid_ground_power;
+		//b->power = FParams.avoid_ground_power;
 	} 
 
 	// Ceiling avoidance

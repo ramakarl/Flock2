@@ -205,8 +205,8 @@ void Sample::DefaultParams ()
 	// SI units:
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
-	m_Params.steps =						4;
-	m_Params.DT =								0.002;									// timestep (sec), .005 = 200 hz
+	m_Params.steps =						2;
+	m_Params.DT =								0.005;									// timestep (sec), .005 = 200 hz
 	m_Params.mass =							0.1;										// bird mass (kg)
 	m_Params.min_speed =				5;											// min speed (m/s)
 	m_Params.max_speed =				18;											// max speed (m/s)
@@ -220,10 +220,10 @@ void Sample::DefaultParams ()
 	m_Params.drag_factor =			0.002;									// drag factor
 	m_Params.safe_radius =			1.5;										// radius of avoidance (m)
 	m_Params.border_cnt =				30;											// border width (# birds)
-	m_Params.border_amt =				0.04f;								 	// border steering amount (keep <0.1)
+	m_Params.border_amt =				0.04f;									// border steering amount (keep <0.1)
 	
 	m_Params.avoid_angular_amt= 0.02f;									// bird angular avoidance amount
-	m_Params.avoid_power_amt =	25.0f;								 		// power avoidance amount (N)
+	m_Params.avoid_power_amt =	0.02f;								 		// power avoidance amount (N)
 	m_Params.avoid_power_ctr =	3;											// power avoidance center (N)
 	
 	m_Params.align_amt =				0.400f;									// bird alignment amount
@@ -233,7 +233,9 @@ void Sample::DefaultParams ()
 	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
 	m_Params.pitch_max =				40;											// max pitch (degrees)
-	m_Params.reaction_delay =		0.0006f;								// reaction delay
+	
+	m_Params.reaction_delay =		0.0008f;								// reaction delay
+
 	m_Params.dynamic_stability = 0.6f;									// dyanmic stability factor
 	m_Params.air_density =			1.225;									// air density (kg/m^3)
 	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
@@ -244,7 +246,6 @@ void Sample::DefaultParams ()
 	m_Params.avoid_ceil_amt =   0.1f;										// ceiling avoid strength
 	
 }
-
 
 
 void Sample::Reset (int num )
@@ -273,7 +274,7 @@ void Sample::Reset (int num )
 	for (int n=0; n < numPoints; n++ ) {
 		
 		//-- test: head-on impact of two bird flocks
-		/*bool ok = false;
+		/* bool ok = false;
 		while (!ok) {
 			pos = m_rnd.randV3( -50, 50 );
 			if (pos.Length() < 50 ) {				
@@ -282,7 +283,7 @@ void Sample::Reset (int num )
 				vel = Vec3F(  0,   0, grp ?  50 :-50 );
 				h = grp ? 90 : -90;
 				b = AddBird ( pos, vel, Vec3F(0, 0, h), 3); 
-				b->clr = (grp==0) ? Vec4F(1,0,0,1) : Vec4F(0,1,0,1);
+				//rb->clr = (grp==0) ? Vec4F(1,0,0,1) : Vec4F(0,1,0,1);
 				ok = true;
 			}
 		} */
@@ -292,9 +293,8 @@ void Sample::Reset (int num )
 		pos.y = pos.y * .5f + 50;
 		vel = m_rnd.randV3( -20, 20 );
 		h = m_rnd.randF(-180, 180);
-		b = AddBird ( pos, vel, Vec3F(0, 0, h), 3); 
-		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f );
-		
+		b = AddBird ( pos, vel, Vec3F(0, 0, h), 3);  
+		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f ); 	
 
 	}
 	
@@ -803,8 +803,7 @@ void Sample::Advance ()
 
 		Vec3F centroid (0,100,0);
 
-		//--- Reynold's behaviors	
-		//		
+		
 		for (int n=0; n < numPoints; n++) {
 
 			b = (Bird*) m_Birds.GetElem( FBIRD, n);
@@ -814,18 +813,20 @@ void Sample::Advance ()
 				continue;		
 			} 		
 
+			// Hoetzlein - Peripheral bird term
 			// Turn isolated birds toward flock centroid
 			float d = b->nbr_cnt / m_Params.border_cnt;
-			if ( d < 1.0 ) { 
+			if ( d > 0 && d < 1 ) { 
 				b->clr.Set(0,1,0, 1);	
 				dirj = centroid - b->pos; dirj.Normalize();
 				dirj *= b->orient.inverse();
 				yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 				pitch = asin( dirj.y )*RADtoDEG;
-				b->target.z +=   yaw * m_Params.border_amt;
-				b->target.y += pitch * m_Params.border_amt;				
+				b->target.z +=   yaw * m_Params.border_amt / d;
+				b->target.y += pitch * m_Params.border_amt / d;
 			}		
-	
+
+			//--- Reynold's behaviors	
 			// Rule 1. Avoidance - avoid nearest bird
 			//			
 			// 1a. Side neighbor avoidance
@@ -1215,7 +1216,7 @@ void Sample::Run ()
 
 	// PERF_POP();
 
-	m_time++;
+	m_time += m_Params.DT;
 }
 
 
@@ -1311,7 +1312,7 @@ bool Sample::init ()
 	addSearchPath ( ASSET_PATH );	
 	init2D ( "arial" );
 	setview2D ( w, h );	
-	setTextSz ( 16, 1 );		
+	setTextSz ( 20, 1 );		
 
 	InitGraphs ();
 
@@ -1348,10 +1349,11 @@ void Sample::SetBackground ()
 	start2D( w, h, true );	
 	if ( m_draw_vis ) {
 		// black background for vis
-		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(0,0,0,1) );
+		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
 	} else {
 		// realistic sky
-		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
+		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
+		//drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
 	}
 	end2D();
 }
@@ -1387,7 +1389,7 @@ void Sample::display ()
   }*/
 
 	if ( m_draw_vis ) {
-		glClearColor(0,0,0,1);
+		glClearColor(1,1,1,1);
 	} else {
 		glClearColor(.8,.8,.9,1);
 	}
@@ -1420,9 +1422,9 @@ void Sample::display ()
 
 		// Draw ground plane
 		if ( m_draw_vis ) {
-			drawLine3D ( Vec3F(0,0,0), Vec3F(100,0,0), Vec4F(1,0,0,1));
-			drawLine3D ( Vec3F(0,0,0), Vec3F(  0,0,100), Vec4F(0,0,1,1));
-			drawGrid( Vec4F(0.1,0.1,0.1, 1) );
+			//drawLine3D ( Vec3F(0,0,0), Vec3F(100,0,0), Vec4F(1,0,0,1));
+			//drawLine3D ( Vec3F(0,0,0), Vec3F(  0,0,100), Vec4F(0,0,1,1));
+			//drawGrid( Vec4F(0.1,0.1,0.1, 1) );
 		}
 
 		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
@@ -1432,12 +1434,13 @@ void Sample::display ()
 			if ( m_draw_vis ) {
 				
 				// visualize velocity
-				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);			
-				float v2 = (b->power - 2);
+				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);							
+				//float v2 = (b->power - 2) / 2.0;
+				float v2 = b->ang_accel.Length() / 8.0;				
 				if (b->clr.w==0) {
-					drawLine3D ( b->pos,		b->pos + (b->vel*0.05f),	Vec4F(v2, 1-v2, 1-v2,1) );
+					drawLine3D ( b->pos,		b->pos + (b->vel*0.15f),	Vec4F(0, 1-v2, v2,1) );
 				} else {
-					drawLine3D ( b->pos,		b->pos + (b->vel*0.05f),	b->clr );
+					drawLine3D ( b->pos,		b->pos + (b->vel*0.15f),	b->clr );
 				}
 
 			} else {
@@ -1446,9 +1449,9 @@ void Sample::display ()
 				y = Vec3F(0,1,0) * b->orient;
 				z = Vec3F(0,0,1) * b->orient;
 				Vec3F p,q,r,t;
-				p = b->pos - z * 0.2f;   // wingspan = 40 cm = 0.2m (per wing)
-				q = b->pos + z * 0.2f;
-				r = b->pos + x * 0.22f;   // length = 22 cm = 0.22m
+				p = b->pos - z * 0.3f;   // wingspan = 40 cm = 0.2m (per wing)
+				q = b->pos + z * 0.3f;
+				r = b->pos + x * 0.4f;   // length = 22 cm = 0.22m
 				t = y;				
 				drawTri3D ( p, q, r, t, Vec4F(1,1,1,1) );
 			}
@@ -1464,17 +1467,23 @@ void Sample::display ()
 	end3D();
 
 	start2D ( w, h );
+	
+		Vec4F tc (0,0,0,1);
+		sprintf ( msg, "t=%4.3f sec", m_time );
+	  drawText ( Vec2F(10, 10), msg, tc );
 		
 		if ( m_bird_sel != -1) {
+			
+
 			Bird* bsel = (Bird*) m_Birds.GetElem ( FBIRD, m_bird_ndx );	// use index here
 			sprintf ( msg, "x: %f y: %f\n", getX(), getY() );
-			drawText ( Vec2F(10, 10), msg, Vec4F(1,1,1,1) );
+			drawText ( Vec2F(10, 10), msg, tc );
 			sprintf ( msg, "pos: %f %f %f\n", bsel->pos.x, bsel->pos.y, bsel->pos.z );
-			drawText ( Vec2F(10, 30), msg, Vec4F(1,1,1,1) );
+			drawText ( Vec2F(10, 30), msg, tc );
 			sprintf ( msg, "vel: %f %f %f = %f\n", bsel->vel.x, bsel->vel.y, bsel->vel.z, bsel->vel.Length() );
-			drawText ( Vec2F(10, 50), msg, Vec4F(1,1,1,1) );
+			drawText ( Vec2F(10, 50), msg, tc );
 			sprintf ( msg, "power: %f\n", bsel->power );
-			drawText ( Vec2F(10, 70), msg, Vec4F(1,1,1,1) );
+			drawText ( Vec2F(10, 70), msg, tc );
 			
 		
 			// Graph selected bird 
