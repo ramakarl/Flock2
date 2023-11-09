@@ -1352,8 +1352,8 @@ void Sample::SetBackground ()
 		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
 	} else {
 		// realistic sky
-		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
-		//drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
+		//drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
+		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
 	}
 	end2D();
 }
@@ -1490,7 +1490,7 @@ void Sample::display ()
 			if (m_bird_sel != -1) {			
 				Vec2F a,b;
 				// draw graphs
-				drawBox ( Vec2F(0, 20), Vec2F(getWidth(), 420.f), Vec4F(.5,.5,.5,1 ));
+				drawRect ( Vec2F(0, 20), Vec2F(getWidth(), 420.f), Vec4F(.5,.5,.5,1 ));
 				drawLine ( Vec2F(0, 210), Vec2F(getWidth(), 210.f), Vec4F(.5,.5,.5,1 ));
 				for (int k=0; k < m_graph.size(); k++) {
 					b = Vec3F( 0, 210 - m_graph[k].y[0], 0);

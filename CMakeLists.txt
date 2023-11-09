@@ -46,71 +46,20 @@ endif()
 #####################################################################################
 # Options
 
+set( USE_NVTX true CACHE BOOL "")
+
 _REQUIRE_MAIN()
 
-set( USE_NVTX true CACHE BOOL "")
+_REQUIRE_GL()
+
+_REQUIRE_GLEW()
+
+_REQUIRE_CUDA( TRUE, "." )
 
 #--- symbols in release mode
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi" CACHE STRING "" FORCE)
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF" CACHE STRING "" FORCE)
 
-###################################################################################
-# OpenGL & GLEW
-#
-OPTION (BUILD_OPENGL "Build with OpenGL" ON)
-if (BUILD_OPENGL)
-    message ( STATUS "Searching for OpenGL and GLEW.." )
-	find_package(OpenGL)
-	add_definitions(-DUSE_OPENGL)  		# Use OpenGL
-	IF (WIN32)
-	     LIST(APPEND LIBRARIES_OPTIMIZED "opengl32.lib" )
-	     LIST(APPEND LIBRARIES_DEBUG "opengl32.lib" )
-	ENDIF()
-	add_definitions(-DGLEW_STATIC)
-	file(GLOB COMMON_SOURCE_FILES "${LIBMIN_GLEW_DIR}/glew.c" )   # Use GLEW (static)	
-	message ( STATUS "  ---> Using GLEW: ${COMMON_SOURCE_FILES}" )
-endif()
-
-####################################################################################
-# Find CUDA
-#
-if (NOT CUDA_TOOLKIT_ROOT_DIR) 
-	set ( CUDA_TOOLKIT_ROOT_DIR "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.2" CACHE PATH "CUDA Toolkit path")
-endif()
-if ( NOT DEFINED CUDA_ARCH_BIN )
-	message( "CUDA_ARCH_BIN not set. Using default. Set this to target GPU architecture.")
-	SET( CUDA_ARCH_BIN "compute_50" CACHE STRING "CUDA Architecture target")
-	SET( CUDA_ARCH_PTX "sm_50" CACHE STRING "CUDA Code target")
-endif ()
-message( STATUS "CUDA:") 
-find_package(CUDA)
-
-if ( CUDA_FOUND )
-	message( STATUS "  --> Using package CUDA (ver ${CUDA_VERSION})") 
-	add_definitions(-DUSE_CUDA)    
-	include_directories(${CUDA_TOOLKIT_INCLUDE})
-	LIST(APPEND LIBRARIES_OPTIMIZED ${CUDA_CUDA_LIBRARY} ${CUDA_CUDART_LIBRARY} )
-	LIST(APPEND LIBRARIES_DEBUG ${CUDA_CUDA_LIBRARY} ${CUDA_CUDART_LIBRARY} )
-	LIST(APPEND PACKAGE_SOURCE_FILES ${CUDA_TOOLKIT_INCLUDE} )    
-	source_group(CUDA FILES ${CUDA_TOOLKIT_INCLUDE} ) 
-	if (USE_NVTX)
-		add_definitions(-DUSE_NVTX)
-	endif()	
-else()
-	message ( FATAL_ERROR "  ---> Unable to find package CUDA")
-endif()
-
-####################################################################################
-# Compile PTX Files
-#
-file(GLOB CUDA_FILES RELATIVE "${BASE_DIRECTORY}" *.cu *.cuh)
-message ( STATUS "Build CUDA kernels: ${CUDA_FILES}" )
-
-if ( USE_DEBUG_PTX )
-	_COMPILEPTX ( SOURCES ${CUDA_FILES} TARGET_PATH ${EXECUTABLE_OUTPUT_PATH} GENERATED CUDA_PTX GENPATHS CUDA_PTX_PATHS INCLUDE "${CMAKE_CURRENT_SOURCE_DIR},${LIBMIN_INC_DIR}" OPTIONS --ptx -arch=${CUDA_ARCH_BIN} -code=${CUDA_ARCH_PTX} -dc -Xptxas -v -G -g --use_fast_math --maxrregcount=32 )
-else()
-	_COMPILEPTX ( SOURCES ${CUDA_FILES} TARGET_PATH ${EXECUTABLE_OUTPUT_PATH} GENERATED CUDA_PTX GENPATHS CUDA_PTX_PATHS INCLUDE "${CMAKE_CURRENT_SOURCE_DIR},${LIBMIN_INC_DIR}" OPTIONS --ptx -arch=${CUDA_ARCH_BIN} -code=${CUDA_ARCH_PTX} -dc -Xptxas -v -O3 --use_fast_math --maxrregcount=32 )
-endif()
 
 ######################
 # CMAKE_INSTALL_PREFIX -- path where library will be installed to
@@ -191,6 +140,7 @@ _DEFAULT_INSTALL_PATH()
 # *NOTE*: file COPY is at cmake-time, not compile-time. Need to replace with add_custom_command -E copy_directory (my own _COPY)
 
 file (COPY "${CMAKE_CURRENT_SOURCE_DIR}/assets" DESTINATION ${EXECUTABLE_OUTPUT_PATH} )	# assets folder
+_INSTALL ( FILES ${GLEW_FILES} DESTINATION ${EXECUTABLE_OUTPUT_PATH} )
 _INSTALL ( FILES ${SHADERS} DESTINATION "${EXECUTABLE_OUTPUT_PATH}/assets" )		# shaders
 _INSTALL ( FILES ${PACKAGE_DLLS} DESTINATION ${EXECUTABLE_OUTPUT_PATH} )		# DLLs
 install ( FILES $<TARGET_PDB_FILE:${PROJNAME}> DESTINATION ${EXECUTABLE_OUTPUT_PATH} OPTIONAL )		# PDB
