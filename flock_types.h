@@ -62,7 +62,7 @@
 		f3			ave_pos, ave_vel, ang_accel;
 		
 		float		speed, pitch_adv, power;	
-		int			id, near_j, nbr_cnt;		
+		int			id, near_j, t_nbrs, r_nbrs;
 	};
 
 

@@ -98,6 +98,110 @@ extern "C" __global__ void countingSortFull ( int pnum )
 	}
 } 
 
+
+	
+
+extern "C" __global__ void findNeighborsTopological ( int pnum)
+{			
+	uint i = __mul24(blockIdx.x, blockDim.x) + threadIdx.x;	// particle index				
+	if ( i >= pnum ) return;
+
+	// Get search cell	
+	uint gc = FBirds.bufI(FGCELL)[ i ];
+	if ( gc == GRID_UNDEF ) return;						// particle out-of-range
+	gc -= (1*FAccel.gridRes.z + 1)*FAccel.gridRes.x + 1;
+
+	register int cell, c, j, cndx;	
+	register float3 dist, diri;
+	register float dsq, nearest;
+	Bird *bi, *bj;	
+	float pi, pj;
+	const float d2 = (FAccel.sim_scale * FAccel.sim_scale);
+	const float rd2 = (FAccel.psmoothradius * FAccel.psmoothradius) / d2;	
+	float birdang;
+	int k, m;
+
+	// topological distance
+	float sort_d_nbr[12];
+	int sort_j_nbr[12];
+	int sort_num = 0;
+	sort_d_nbr[0] = 10^5;
+
+	// current bird
+	bi = ((Bird*) FBirds.data(FBIRD)) + i;	
+	bi->near_j = -1;	
+	bi->t_nbrs = 0;
+	bi->r_nbrs = 0;
+	bi->ave_pos = make_float3(0,0,0);
+	bi->ave_vel = make_float3(0,0,0);
+	diri = normalize ( bi->vel );
+
+	nearest = rd2;
+
+	// check 3x3 grid cells	
+	for ( c=0; c < FAccel.gridAdjCnt; c++) {
+		cell = gc + FAccel.gridAdj[c];		
+		// check each entry in grid..
+		for ( cndx = FGrid.bufI(AGRIDOFF)[cell]; cndx < FGrid.bufI(AGRIDOFF)[cell] + FGrid.bufI(AGRIDCNT)[cell]; cndx++ ) {
+			j = FGrid.bufI(AGRID)[ cndx ];				
+			if (i==j) continue;
+
+			bj = ((Bird*) FBirds.data(FBIRD)) + j;
+
+			// check for neighbor
+			dist = ( bi->pos - bj->pos );		
+			dsq = (dist.x*dist.x + dist.y*dist.y + dist.z*dist.z);
+
+			if ( dsq < rd2 ) {
+				// neighbor is within check radius..
+
+				// confirm bird is within forward field-of-view
+				dist = normalize( bj->pos - bi->pos );
+				birdang = dot ( diri, dist );				
+				if (birdang > FParams.fovcos ) {					
+					
+					// put into topological sorted list					
+					for (k = 0; dsq > sort_d_nbr[k] && k < sort_num;)
+						k++;
+					
+					// only insert if bird is closer than the top N
+					if (k <= sort_num) {
+						// shift others down (insertion sort)
+						if ( k != sort_num ) {
+							for (m = sort_num-1; m >= k; m--) {
+								sort_d_nbr[m+1] = sort_d_nbr[m];
+								sort_j_nbr[m+1] = sort_j_nbr[m];
+							}
+						}
+						sort_d_nbr[k] = dsq;
+						sort_j_nbr[k] = j;
+						
+						// max topological neighbors
+						if (++sort_num > 7 ) sort_num = 7;
+					}	
+
+					// count boundary neighbors
+					bi->r_nbrs++;
+					
+				}
+			}	
+		}		
+	}
+
+	// compute nearest and average among N (~7) topological neighbors
+	for (k=0; k < sort_num; k++) {
+		bj = ((Bird*) FBirds.data(FBIRD)) + sort_j_nbr[k];
+		bi->ave_pos += bj->pos;
+		bi->ave_vel += bj->vel;		
+	}
+	bi->t_nbrs = sort_num;
+	if (sort_num > 0 ) {
+		bi->ave_pos *= (1.0f / sort_num );
+		bi->ave_vel *= (1.0f / sort_num );
+	}
+
+}
+
 extern "C" __global__ void findNeighbors ( int pnum)
 {			
 	uint i = __mul24(blockIdx.x, blockDim.x) + threadIdx.x;	// particle index				
@@ -122,7 +226,8 @@ extern "C" __global__ void findNeighbors ( int pnum)
 	// current bird
 	bi = ((Bird*) FBirds.data(FBIRD)) + i;	
 	bi->near_j = -1;	
-	bi->nbr_cnt = 0;
+	bi->r_nbrs = 0;
+	bi->t_nbrs = 0;
 	bi->ave_pos = make_float3(0,0,0);
 	bi->ave_vel = make_float3(0,0,0);
 	diri = normalize ( bi->vel );
@@ -153,7 +258,7 @@ extern "C" __global__ void findNeighbors ( int pnum)
 				if (birdang > FParams.fovcos ) {
 
 					// find nearest
-					dsq = sqrt(dsq);			
+					dsq = sqrt( dsq );			
 					if ( dsq < nearest ) {
 						nearest = dsq;
 						bi->near_j = j;
@@ -161,15 +266,15 @@ extern "C" __global__ void findNeighbors ( int pnum)
 					// average neighbors
 					bi->ave_pos += bj->pos;
 					bi->ave_vel += bj->vel;
-					bi->nbr_cnt++;
+					bi->r_nbrs++;
 				}
 			}	
 		}		
 	}
 
-	if (bi->nbr_cnt > 0 ) {
-		bi->ave_pos *= (1.0f / bi->nbr_cnt );
-		bi->ave_vel *= (1.0f / bi->nbr_cnt );
+	if (bi->r_nbrs > 0 ) {
+		bi->ave_pos *= (1.0f / bi->r_nbrs);
+		bi->ave_vel *= (1.0f / bi->r_nbrs);
 	}
 
 }
@@ -225,7 +330,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
   float3 centroid = make_float3(0,50,0);
 
 	// Turn isolated birds toward flock centroid
-	float d = b->nbr_cnt / FParams.border_cnt;
+	float d = b->r_nbrs / FParams.border_cnt;
 	if ( d < 1.0 ) { 
 		b->clr = make_float4(1, .5, 0, 1);	
 		dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
@@ -235,8 +340,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 		b->target.y += pitch * FParams.border_amt;		
 	}
 
-
-	if ( b->nbr_cnt > 0 ) {
+	if ( b->r_nbrs > 0 ) {
 
 		// Rule 1. Avoidance
 		//

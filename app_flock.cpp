@@ -158,7 +158,7 @@ void Sample::LoadAllKernels ()
 
 	LoadKernel ( KERNEL_INSERT,					"insertParticles" );
 	LoadKernel ( KERNEL_COUNTING_SORT,	"countingSortFull" );	
-	LoadKernel ( KERNEL_FIND_NBRS,			"findNeighbors" );
+	LoadKernel ( KERNEL_FIND_NBRS,			"findNeighborsTopological" );
 	LoadKernel ( KERNEL_ADVANCE,				"advanceBirds" );
 	LoadKernel ( KERNEL_FPREFIXSUM,			"prefixSum" );
 	LoadKernel ( KERNEL_FPREFIXFIXUP,		"prefixFixup" );
@@ -218,23 +218,23 @@ void Sample::DefaultParams ()
 
 	m_Params.lift_factor =			0.100;									// lift factor
 	m_Params.drag_factor =			0.002;									// drag factor
-	m_Params.safe_radius =			1.5;										// radius of avoidance (m)
+	m_Params.safe_radius =			2.0;										// radius of avoidance (m)
 	m_Params.border_cnt =				30;											// border width (# birds)
-	m_Params.border_amt =				0.04f;									// border steering amount (keep <0.1)
+	m_Params.border_amt =				0.08f;									// border steering amount (keep <0.1)
 	
 	m_Params.avoid_angular_amt= 0.02f;									// bird angular avoidance amount
 	m_Params.avoid_power_amt =	0.02f;								 		// power avoidance amount (N)
 	m_Params.avoid_power_ctr =	3;											// power avoidance center (N)
 	
-	m_Params.align_amt =				0.400f;									// bird alignment amount
+	m_Params.align_amt =				0.700f;									// bird alignment amount
 
-	m_Params.cohesion_amt =			0.0005f;								// bird cohesion amount
+	m_Params.cohesion_amt =			0.0001f;								// bird cohesion amount
 
 	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
 	m_Params.pitch_min =				-40;										// min pitch (degrees)
 	m_Params.pitch_max =				40;											// max pitch (degrees)
 	
-	m_Params.reaction_delay =		0.0008f;								// reaction delay
+	m_Params.reaction_delay =		0.0020f;								// reaction delay
 
 	m_Params.dynamic_stability = 0.6f;									// dyanmic stability factor
 	m_Params.air_density =			1.225;									// air density (kg/m^3)
@@ -637,6 +637,13 @@ void Sample::FindNeighbors ()
 		float fov_fwd = 60;
 
 		float ang, birdang;		
+		
+		// topological distance
+		float sort_d_nbr[12];
+		int sort_j_nbr[12];
+		int sort_num = 0;
+		sort_d_nbr[0] = 10^5;
+		int k, m;
 
 		m_centroid.Set(0,0,0);
 
@@ -655,10 +662,13 @@ void Sample::FindNeighbors ()
 			bi->ave_pos.Set(0,0,0);
 			bi->ave_vel.Set(0,0,0);
 			bi->near_j = -1;			
-			bi->nbr_cnt = 0;
+			bi->t_nbrs = 0;
+			bi->r_nbrs = 0;
 
 			nearest = rd2;
 			nearest_fwd = rd2;
+
+			sort_num = 0;
 
 			// search neighbors
 			int gc = m_Birds.bufUI(FGCELL)[i];
@@ -690,38 +700,47 @@ void Sample::FindNeighbors ()
 
 								if ( birdang > fov ) {
 
-									// find nearest 
-									dsq = sqrt(dsq);
-									if ( dsq < nearest ) {
-										nearest = dsq;
-										bi->near_j = j;
-									}
-									// find nearest incoming (nbr /w opposing velocity)
-									/* Vec3F v1, v2;
-									v1 = bi->vel;	v1.Normalize();
-									v2 = bj->vel; v2.Normalize();
-									ang = v1.Dot(v2);
-									if ( dsq < nearest_fwd && ang < 0 ) {
-										nearest_fwd = dsq;
-										bi->near_in = j;
-										bi->near_in_ang = ang;
-									} */
+									// put into topological sorted list					
+									for (k = 0; dsq > sort_d_nbr[k] && k < sort_num;)
+										k++;
+					
+									// only insert if bird is closer than the top N
+									if (k <= sort_num) {
+										// shift others down (insertion sort)
+										if ( k != sort_num ) {
+											for (m = sort_num-1; m >= k; m--) {
+												sort_d_nbr[m+1] = sort_d_nbr[m];
+												sort_j_nbr[m+1] = sort_j_nbr[m];
+											}
+										}
+										sort_d_nbr[k] = dsq;
+										sort_j_nbr[k] = j;
+						
+										// max topological neighbors
+										if (++sort_num > 10 ) sort_num = 10;
+									}		
 
-									// average neighbors
-									bi->ave_pos += bj->pos;
-									bi->ave_vel += bj->vel;
-									bi->nbr_cnt++;
-				
+									// count bounary neighbors
+									bi->r_nbrs++;
+
 								}
 							}
 						}
 					}
+				}				
+		
+		}
 
-				}	
-				if (bi->nbr_cnt > 0) {
-					bi->ave_pos *= (1.0f / bi->nbr_cnt);
-					bi->ave_vel *= (1.0f / bi->nbr_cnt);
-				}
+		// compute nearest and average among N (~7) topological neighbors
+		for (k=0; k < sort_num; k++) {
+			bj = (Bird*) m_Birds.GetElem( FBIRD, sort_j_nbr[k] );
+			bi->ave_pos += bj->pos;
+			bi->ave_vel += bj->vel;					
+		}
+		bi->t_nbrs = sort_num;
+		if (sort_num > 0 ) {
+			bi->ave_pos *= (1.0f / sort_num );
+			bi->ave_vel *= (1.0f / sort_num );
 		}
 
 		m_centroid *= (1.0f / numPoints);
@@ -809,13 +828,13 @@ void Sample::Advance ()
 			b = (Bird*) m_Birds.GetElem( FBIRD, n);
 			b->clr.Set(0,0,0,0);
 
-			if ( b->nbr_cnt == 0 ) {			
+			if ( b->r_nbrs == 0 ) {			
 				continue;		
 			} 		
 
 			// Hoetzlein - Peripheral bird term
 			// Turn isolated birds toward flock centroid
-			float d = b->nbr_cnt / m_Params.border_cnt;
+			float d = b->r_nbrs / m_Params.border_cnt;
 			if ( d > 0 && d < 1 ) { 
 				b->clr.Set(0,1,0, 1);	
 				dirj = centroid - b->pos; dirj.Normalize();
@@ -1303,7 +1322,7 @@ bool Sample::init ()
 	m_rnd.seed (12);
 	
 	//m_gpu = false;
-	 m_gpu = true;
+	m_gpu = true;
 
 	m_kernels_loaded = false;
 
