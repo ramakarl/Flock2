@@ -126,6 +126,7 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 	int sort_j_nbr[12];
 	int sort_num = 0;
 	sort_d_nbr[0] = 10^5;
+	sort_j_nbr[0] = -1;
 
 	// current bird
 	bi = ((Bird*) FBirds.data(FBIRD)) + i;	
@@ -194,6 +195,8 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 		bi->ave_pos += bj->pos;
 		bi->ave_vel += bj->vel;		
 	}
+	bi->near_j = sort_j_nbr[0];
+
 	bi->t_nbrs = sort_num;
 	if (sort_num > 0 ) {
 		bi->ave_pos *= (1.0f / sort_num );
