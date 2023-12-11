@@ -848,6 +848,7 @@ void Sample::Advance ()
 				b->target.y += pitch * m_Params.border_amt / d;
 			}		
 
+
 			//--- Reynold's behaviors	
 			// Rule 1. Avoidance - avoid nearest bird
 			//			
@@ -912,10 +913,10 @@ void Sample::Advance ()
 			b->target.y += pitch * m_Params.align_amt;		 
 
 			// Rule 3. Cohesion - steer toward neighbor centroid
-			dirj = b->ave_pos - b->pos;
+			dirj = b->ave_pos - b->pos;		// direction to ave nbrs
 			dirj.Normalize();
-			dirj *= b->orient.inverse();		// using inverse orient for world-to-local xform		
-			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
+			dirj *= b->orient.inverse();	// world-to-local xform		
+			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;  
 			pitch = asin( dirj.y )*RADtoDEG;
 			b->target.z += yaw   * m_Params.cohesion_amt;
 			b->target.y += pitch * m_Params.cohesion_amt;		
@@ -1187,7 +1188,7 @@ void Sample::VisualizeSelectedBird ()
 						if ( dsq < rd2 ) {							
 							ave_dist += sqrt( dsq );
 							ncnt++;
-							m_vis.push_back ( vis_t( bj->pos, 1.1f, Vec4F(1,1,0,1) ) );		// neighbor birds (yellow)
+							m_vis.push_back ( vis_t( bj->pos, 0.5f, Vec4F(1,1,0,1) ) );		// neighbor birds (yellow)
 						}
 				}
 			}
@@ -1331,7 +1332,9 @@ bool Sample::init ()
 
 	m_bird_sel = -1;
 	
-	addSearchPath ( ASSET_PATH );	
+
+	// addSearchPath ( ASSET_PATH );	
+
 	init2D ( "arial" );
 	setview2D ( w, h );	
 	setTextSz ( 20, 1 );		
