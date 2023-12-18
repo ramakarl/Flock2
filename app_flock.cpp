@@ -126,43 +126,47 @@ public:
 	std::vector< graph_t> m_graph;
 
 	// CUDA / GPU
-	void			LoadKernel ( int fid, std::string func );
-	void			LoadAllKernels ();
+	#ifdef BUILD_CUDA
+		void			LoadKernel ( int fid, std::string func );
+		void			LoadAllKernels ();
 
-	CUcontext		m_ctx;
-	CUdevice		m_dev; 
-	CUdeviceptr	m_cuAccel;
-	CUdeviceptr	m_cuParam;
-	CUmodule		m_Module;
-	CUfunction	m_Kernel[ KERNEL_MAX ];
+		CUcontext		m_ctx;
+		CUdevice		m_dev; 
+		CUdeviceptr	m_cuAccel;
+		CUdeviceptr	m_cuParam;
+		CUmodule		m_Module;
+		CUfunction	m_Kernel[ KERNEL_MAX ];
+	#endif
 };
 
 Sample obj;
 
-void Sample::LoadKernel ( int fid, std::string func )
-{
-	char cfn[512];		
-	strcpy ( cfn, func.c_str() );
-	cuCheck ( cuModuleGetFunction ( &m_Kernel[fid], m_Module, cfn ), "LoadKernel", "cuModuleGetFunction", cfn, DEBUG_CUDA );	
-}
-
-void Sample::LoadAllKernels ()
-{
-	std::string ptxfile = "flock_kernels.ptx";
-	std::string filepath;
-	if (!getFileLocation ( ptxfile, filepath )) {
-		printf ( "ERROR: Unable to find %s\n", ptxfile.c_str() );
-		exit(-7);
+#ifdef BUILD_CUDA
+	void Sample::LoadKernel ( int fid, std::string func )
+	{
+		char cfn[512];		
+		strcpy ( cfn, func.c_str() );
+		cuCheck ( cuModuleGetFunction ( &m_Kernel[fid], m_Module, cfn ), "LoadKernel", "cuModuleGetFunction", cfn, DEBUG_CUDA );	
 	}
-	cuCheck ( cuModuleLoad ( &m_Module, filepath.c_str() ), "LoadKernel", "cuModuleLoad", "flock_kernels.ptx", DEBUG_CUDA );
 
-	LoadKernel ( KERNEL_INSERT,					"insertParticles" );
-	LoadKernel ( KERNEL_COUNTING_SORT,	"countingSortFull" );	
-	LoadKernel ( KERNEL_FIND_NBRS,			"findNeighborsTopological" );
-	LoadKernel ( KERNEL_ADVANCE,				"advanceBirds" );
-	LoadKernel ( KERNEL_FPREFIXSUM,			"prefixSum" );
-	LoadKernel ( KERNEL_FPREFIXFIXUP,		"prefixFixup" );
-}
+	void Sample::LoadAllKernels ()
+	{
+		std::string ptxfile = "flock_kernels.ptx";
+		std::string filepath;
+		if (!getFileLocation ( ptxfile, filepath )) {
+			printf ( "ERROR: Unable to find %s\n", ptxfile.c_str() );
+			exit(-7);
+		}
+		cuCheck ( cuModuleLoad ( &m_Module, filepath.c_str() ), "LoadKernel", "cuModuleLoad", "flock_kernels.ptx", DEBUG_CUDA );
+
+		LoadKernel ( KERNEL_INSERT,					"insertParticles" );
+		LoadKernel ( KERNEL_COUNTING_SORT,	"countingSortFull" );	
+		LoadKernel ( KERNEL_FIND_NBRS,			"findNeighborsTopological" );
+		LoadKernel ( KERNEL_ADVANCE,				"advanceBirds" );
+		LoadKernel ( KERNEL_FPREFIXSUM,			"prefixSum" );
+		LoadKernel ( KERNEL_FPREFIXFIXUP,		"prefixFixup" );
+	}
+#endif
 
 Bird* Sample::AddBird ( Vec3F pos, Vec3F vel, Vec3F target, float power )
 {
@@ -308,42 +312,44 @@ void Sample::Reset (int num )
 
 	InitializeGrid ();
 
-	// Reset GPU 
-	if (m_gpu) {
+	#ifdef BUILD_CUDA
+		// Reset GPU 
+		if (m_gpu) {
 		
-		// Load GPU kernels [if needed]
-		if (!m_kernels_loaded) {
-			m_kernels_loaded = true;
-			LoadAllKernels ();
-			size_t len;
-			cuCheck ( cuModuleGetGlobal ( &m_cuAccel,  &len, m_Module, "FAccel" ), "Initialize", "cuModuleGetGlobal", "cuAccel", true );
-			cuCheck ( cuModuleGetGlobal ( &m_cuParam, &len, m_Module, "FParams" ), "Initialize", "cuModuleGetGlobal", "cuParam", true );
+			// Load GPU kernels [if needed]
+			if (!m_kernels_loaded) {
+				m_kernels_loaded = true;
+				LoadAllKernels ();
+				size_t len;
+				cuCheck ( cuModuleGetGlobal ( &m_cuAccel,  &len, m_Module, "FAccel" ), "Initialize", "cuModuleGetGlobal", "cuAccel", true );
+				cuCheck ( cuModuleGetGlobal ( &m_cuParam, &len, m_Module, "FParams" ), "Initialize", "cuModuleGetGlobal", "cuParam", true );
+			}
+			// Assign GPU symbols
+			m_Birds.AssignToGPU ( "FBirds", m_Module );
+			m_BirdsTmp.AssignToGPU ( "FBirdsTmp", m_Module );
+			m_Grid.AssignToGPU ( "FGrid", m_Module );		
+			cuCheck ( cuMemcpyHtoD ( m_cuAccel, &m_Accel,	sizeof(Accel) ), "Accel", "cuMemcpyHtoD", "cuAccel", DEBUG_CUDA );
+			cuCheck ( cuMemcpyHtoD ( m_cuParam, &m_Params, sizeof(Params) ), "Params", "cuMemcpyHtoD", "cuParam", DEBUG_CUDA );
+
+			// Commit birds
+			m_Birds.CommitAll ();
+
+			// Update temp list
+			m_BirdsTmp.MatchAllBuffers ( &m_Birds, DT_CUMEM );
+
+			// Compute particle thread blocks	
+			int threadsPerBlock = 512;	
+			ComputeNumBlocks ( numPoints, threadsPerBlock, m_Accel.numBlocks, m_Accel.numThreads);				// particles    
+			m_Accel.szPnts = (m_Accel.numBlocks  * m_Accel.numThreads);     
+			dbgprintf ( "  Particles: %d, threads:%d x %d=%d, size:%d\n", numPoints, m_Accel.numBlocks, m_Accel.numThreads, m_Accel.numBlocks*m_Accel.numThreads, m_Accel.szPnts);	
+
+			// Update GPU access
+			m_Birds.UpdateGPUAccess ();
+			m_BirdsTmp.UpdateGPUAccess ();
+			m_Grid.UpdateGPUAccess ();
+
 		}
-		// Assign GPU symbols
-		m_Birds.AssignToGPU ( "FBirds", m_Module );
-		m_BirdsTmp.AssignToGPU ( "FBirdsTmp", m_Module );
-		m_Grid.AssignToGPU ( "FGrid", m_Module );		
-		cuCheck ( cuMemcpyHtoD ( m_cuAccel, &m_Accel,	sizeof(Accel) ), "Accel", "cuMemcpyHtoD", "cuAccel", DEBUG_CUDA );
-		cuCheck ( cuMemcpyHtoD ( m_cuParam, &m_Params, sizeof(Params) ), "Params", "cuMemcpyHtoD", "cuParam", DEBUG_CUDA );
-
-		// Commit birds
-		m_Birds.CommitAll ();
-
-		// Update temp list
-		m_BirdsTmp.MatchAllBuffers ( &m_Birds, DT_CUMEM );
-
-		// Compute particle thread blocks	
-		int threadsPerBlock = 512;	
-		ComputeNumBlocks ( numPoints, threadsPerBlock, m_Accel.numBlocks, m_Accel.numThreads);				// particles    
-		m_Accel.szPnts = (m_Accel.numBlocks  * m_Accel.numThreads);     
-		dbgprintf ( "  Particles: %d, threads:%d x %d=%d, size:%d\n", numPoints, m_Accel.numBlocks, m_Accel.numThreads, m_Accel.numBlocks*m_Accel.numThreads, m_Accel.szPnts);	
-
-		// Update GPU access
-		m_Birds.UpdateGPUAccess ();
-		m_BirdsTmp.UpdateGPUAccess ();
-		m_Grid.UpdateGPUAccess ();
-
-	}
+	#endif
 
 	printf ( "Added %d birds.\n", m_Params.num_birds );
 }
@@ -448,16 +454,18 @@ void Sample::InsertIntoGrid ()
 
 	if (m_gpu) {
 
-		// Reset all grid cells to empty	
-		cuCheck ( cuMemsetD8 ( m_Grid.gpu(AGRIDCNT),	0,	m_Accel.gridTotal*sizeof(uint) ), "InsertParticlesCUDA", "cuMemsetD8", "AGRIDCNT", DEBUG_CUDA );
-		cuCheck ( cuMemsetD8 ( m_Grid.gpu(AGRIDOFF),	0,	m_Accel.gridTotal*sizeof(uint) ), "InsertParticlesCUDA", "cuMemsetD8", "AGRIDOFF", DEBUG_CUDA );
-		cuCheck ( cuMemsetD8 ( m_Birds.gpu(FGCELL),		0,	numPoints*sizeof(int) ), "InsertParticlesCUDA", "cuMemsetD8", "FGCELL", DEBUG_CUDA );
-		cuCheck ( cuMemsetD8 ( m_Birds.gpu(FGNDX),		0,	numPoints*sizeof(int) ), "InsertParticlesCUDA", "cuMemsetD8", "FGNDX", DEBUG_CUDA );
+		#ifdef BUILD_CUDA
+			// Reset all grid cells to empty	
+			cuCheck ( cuMemsetD8 ( m_Grid.gpu(AGRIDCNT),	0,	m_Accel.gridTotal*sizeof(uint) ), "InsertParticlesCUDA", "cuMemsetD8", "AGRIDCNT", DEBUG_CUDA );
+			cuCheck ( cuMemsetD8 ( m_Grid.gpu(AGRIDOFF),	0,	m_Accel.gridTotal*sizeof(uint) ), "InsertParticlesCUDA", "cuMemsetD8", "AGRIDOFF", DEBUG_CUDA );
+			cuCheck ( cuMemsetD8 ( m_Birds.gpu(FGCELL),		0,	numPoints*sizeof(int) ), "InsertParticlesCUDA", "cuMemsetD8", "FGCELL", DEBUG_CUDA );
+			cuCheck ( cuMemsetD8 ( m_Birds.gpu(FGNDX),		0,	numPoints*sizeof(int) ), "InsertParticlesCUDA", "cuMemsetD8", "FGNDX", DEBUG_CUDA );
 
-		// Insert into grid (GPU)
-		void* args[1] = { &numPoints };
-		cuCheck(cuLaunchKernel ( m_Kernel[KERNEL_INSERT], m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL),
-			"InsertParticlesCUDA", "cuLaunch", "FUNC_INSERT", DEBUG_CUDA );
+			// Insert into grid (GPU)
+			void* args[1] = { &numPoints };
+			cuCheck(cuLaunchKernel ( m_Kernel[KERNEL_INSERT], m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL),
+				"InsertParticlesCUDA", "cuLaunch", "FUNC_INSERT", DEBUG_CUDA );
+		#endif
 
 	} else {
 
@@ -507,58 +515,60 @@ void Sample::PrefixSumGrid ()
 {
 	if (m_gpu) {
 
-		// PrefixSum - GPU
-		// Prefix Sum - determine grid offsets
-		int blockSize = SCAN_BLOCKSIZE << 1;
-		int numElem1 = m_Accel.gridTotal;		
-		int numElem2 = int ( numElem1 / blockSize ) + 1;
-		int numElem3 = int ( numElem2 / blockSize ) + 1;
-		int threads = SCAN_BLOCKSIZE;
-		int zero_offsets = 1;
-		int zon = 1;
+		#ifdef BUILD_CUDA
+			// PrefixSum - GPU
+			// Prefix Sum - determine grid offsets
+			int blockSize = SCAN_BLOCKSIZE << 1;
+			int numElem1 = m_Accel.gridTotal;		
+			int numElem2 = int ( numElem1 / blockSize ) + 1;
+			int numElem3 = int ( numElem2 / blockSize ) + 1;
+			int threads = SCAN_BLOCKSIZE;
+			int zero_offsets = 1;
+			int zon = 1;
 
-		CUdeviceptr array1  = m_Grid.gpu(AGRIDCNT);		// input
-		CUdeviceptr scan1   = m_Grid.gpu(AGRIDOFF);		// output
-		CUdeviceptr array2  = m_Grid.gpu(AAUXARRAY1);
-		CUdeviceptr scan2   = m_Grid.gpu(AAUXSCAN1);
-		CUdeviceptr array3  = m_Grid.gpu(AAUXARRAY2);
-		CUdeviceptr scan3   = m_Grid.gpu(AAUXSCAN2);
+			CUdeviceptr array1  = m_Grid.gpu(AGRIDCNT);		// input
+			CUdeviceptr scan1   = m_Grid.gpu(AGRIDOFF);		// output
+			CUdeviceptr array2  = m_Grid.gpu(AAUXARRAY1);
+			CUdeviceptr scan2   = m_Grid.gpu(AAUXSCAN1);
+			CUdeviceptr array3  = m_Grid.gpu(AAUXARRAY2);
+			CUdeviceptr scan3   = m_Grid.gpu(AAUXSCAN2);
 
-		if ( numElem1 > SCAN_BLOCKSIZE*xlong(SCAN_BLOCKSIZE)*SCAN_BLOCKSIZE) {
-			dbgprintf ( "ERROR: Number of elements exceeds prefix sum max. Adjust SCAN_BLOCKSIZE.\n" );
-		}
-		// prefix scan in blocks with up to two hierarchy layers
-		// this allows total # elements up to SCAN_BLOCKSIZE^3 = 512^3 = 134 million max
-		void* argsA[5] = {&array1, &scan1, &array2, &numElem1, &zero_offsets }; // sum array1. output -> scan1, array2
-		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXSUM], numElem2, 1, 1, threads, 1, 1, 0, NULL, argsA, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXSUM:A", DEBUG_CUDA );
+			if ( numElem1 > SCAN_BLOCKSIZE*xlong(SCAN_BLOCKSIZE)*SCAN_BLOCKSIZE) {
+				dbgprintf ( "ERROR: Number of elements exceeds prefix sum max. Adjust SCAN_BLOCKSIZE.\n" );
+			}
+			// prefix scan in blocks with up to two hierarchy layers
+			// this allows total # elements up to SCAN_BLOCKSIZE^3 = 512^3 = 134 million max
+			void* argsA[5] = {&array1, &scan1, &array2, &numElem1, &zero_offsets }; // sum array1. output -> scan1, array2
+			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXSUM], numElem2, 1, 1, threads, 1, 1, 0, NULL, argsA, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXSUM:A", DEBUG_CUDA );
 
-		void* argsB[5] = { &array2, &scan2, &array3, &numElem2, &zon }; // sum array2. output -> scan2, array3
-		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXSUM], numElem3, 1, 1, threads, 1, 1, 0, NULL, argsB, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXSUM:B", DEBUG_CUDA );
+			void* argsB[5] = { &array2, &scan2, &array3, &numElem2, &zon }; // sum array2. output -> scan2, array3
+			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXSUM], numElem3, 1, 1, threads, 1, 1, 0, NULL, argsB, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXSUM:B", DEBUG_CUDA );
 
-		if ( numElem3 > 1 ) {
-			CUdeviceptr nptr = {0};
-			void* argsC[5] = { &array3, &scan3, &nptr, &numElem3, &zon };	// sum array3. output -> scan3
-			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXSUM], 1, 1, 1, threads, 1, 1, 0, NULL, argsC, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXFIXUP:C", DEBUG_CUDA );
+			if ( numElem3 > 1 ) {
+				CUdeviceptr nptr = {0};
+				void* argsC[5] = { &array3, &scan3, &nptr, &numElem3, &zon };	// sum array3. output -> scan3
+				cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXSUM], 1, 1, 1, threads, 1, 1, 0, NULL, argsC, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXFIXUP:C", DEBUG_CUDA );
 
-			void* argsD[3] = { &scan2, &scan3, &numElem2 };	// merge scan3 into scan2. output -> scan2
-			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXFIXUP], numElem3, 1, 1, threads, 1, 1, 0, NULL, argsD, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXFIXUP:D", DEBUG_CUDA );
-		}
+				void* argsD[3] = { &scan2, &scan3, &numElem2 };	// merge scan3 into scan2. output -> scan2
+				cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXFIXUP], numElem3, 1, 1, threads, 1, 1, 0, NULL, argsD, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXFIXUP:D", DEBUG_CUDA );
+			}
 
-		void* argsE[3] = { &scan1, &scan2, &numElem1 };		// merge scan2 into scan1. output -> scan1
-		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXFIXUP], numElem2, 1, 1, threads, 1, 1, 0, NULL, argsE, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXFIXUP:E", DEBUG_CUDA );
-		// returns grid offsets: scan1 => AGRIDOFF
+			void* argsE[3] = { &scan1, &scan2, &numElem1 };		// merge scan2 into scan1. output -> scan1
+			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FPREFIXFIXUP], numElem2, 1, 1, threads, 1, 1, 0, NULL, argsE, NULL ), "PrefixSumCellsCUDA", "cuLaunch", "FUNC_PREFIXFIXUP:E", DEBUG_CUDA );
+			// returns grid offsets: scan1 => AGRIDOFF
 
-		// Counting Sort
-		//
-		// transfer particle data to temp buffers 
-		//  (required by gpu counting sort algorithm, gpu-to-gpu copy, no context sync needed)	
-		m_Birds.CopyAllBuffers ( &m_BirdsTmp, DT_CUMEM );
+			// Counting Sort
+			//
+			// transfer particle data to temp buffers 
+			//  (required by gpu counting sort algorithm, gpu-to-gpu copy, no context sync needed)	
+			m_Birds.CopyAllBuffers ( &m_BirdsTmp, DT_CUMEM );
 		
-		// sort
-		int numPoints = m_Params.num_birds;
-		void* args[1] = { &numPoints };
-		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_COUNTING_SORT], m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL),
-					"CountingSortFullCUDA", "cuLaunch", "FUNC_COUNTING_SORT", DEBUG_CUDA );
+			// sort
+			int numPoints = m_Params.num_birds;
+			void* args[1] = { &numPoints };
+			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_COUNTING_SORT], m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL),
+						"CountingSortFullCUDA", "cuLaunch", "FUNC_COUNTING_SORT", DEBUG_CUDA );
+		#endif
 
 	} else {
 
@@ -603,11 +613,13 @@ void Sample::FindNeighbors ()
 
 	if (m_gpu) {
 
-		// Find neighborhood (GPU)
-		//		
-		int numPoints = m_Params.num_birds;
-		void* args[1] = { &numPoints };
-		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FIND_NBRS],  m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL), "FindNeighbors", "cuLaunch", "FUNC_FIND_NBRS", DEBUG_CUDA );
+		#ifdef BUILD_CUDA
+			// Find neighborhood (GPU)
+			//		
+			int numPoints = m_Params.num_birds;
+			void* args[1] = { &numPoints };
+			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_FIND_NBRS],  m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL), "FindNeighbors", "cuLaunch", "FUNC_FIND_NBRS", DEBUG_CUDA );
+		#endif
 
 	} else {
 
@@ -718,7 +730,7 @@ void Sample::FindNeighbors ()
 										sort_j_nbr[k] = j;
 						
 										// max topological neighbors
-										if (++sort_num > 10 ) sort_num = 10;
+										if (++sort_num > 7 ) sort_num = 7;
 									}		
 
 									// count bounary neighbors
@@ -767,8 +779,10 @@ void Sample::DebugBird ( int id, std::string msg )
 	Bird* b;
 
 	if (m_gpu) {
-		m_Birds.Retrieve ( FBIRD );
-		cuCtxSynchronize();
+		#ifdef BUILD_CUDA
+			m_Birds.Retrieve ( FBIRD );
+			cuCtxSynchronize();
+		#endif
 	}
 	
 	for (n=0; n < m_Params.num_birds; n++) {
@@ -790,17 +804,19 @@ void Sample::Advance ()
 {
 	if (m_gpu) {
 
-		// Advance - GPU
-		//
-		int numPoints = m_Params.num_birds;
-		void* args[4] = { &m_time, &m_Params.DT, &m_Accel.sim_scale, &numPoints };
+		#ifdef BUILD_CUDA
+			// Advance - GPU
+			//
+			int numPoints = m_Params.num_birds;
+			void* args[4] = { &m_time, &m_Params.DT, &m_Accel.sim_scale, &numPoints };
 
-		cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_ADVANCE],  m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL), "Advance", "cuLaunch", "FUNC_ADVANCE", DEBUG_CUDA );
+			cuCheck ( cuLaunchKernel ( m_Kernel[KERNEL_ADVANCE],  m_Accel.numBlocks, 1, 1, m_Accel.numThreads, 1, 1, 0, NULL, args, NULL), "Advance", "cuLaunch", "FUNC_ADVANCE", DEBUG_CUDA );
 
-		// Retrieve birds from GPU for rendering & visualization
-		m_Birds.Retrieve ( FBIRD );
+			// Retrieve birds from GPU for rendering & visualization
+			m_Birds.Retrieve ( FBIRD );
 		
-		cuCtxSynchronize ();
+			cuCtxSynchronize ();
+		#endif
 
 	} else {
 
@@ -823,17 +839,13 @@ void Sample::Advance ()
 
 		int numPoints = m_Params.num_birds;
 
-		Vec3F centroid (0,100,0);
+		Vec3F centroid (0,50,0);
 
 		
 		for (int n=0; n < numPoints; n++) {
 
 			b = (Bird*) m_Birds.GetElem( FBIRD, n);
-			b->clr.Set(0,0,0,0);
-
-			if ( b->r_nbrs == 0 ) {			
-				continue;		
-			} 		
+			b->clr.Set(0,0,0,0);	
 
 			// Hoetzlein - Peripheral bird term
 			// Turn isolated birds toward flock centroid
@@ -844,85 +856,61 @@ void Sample::Advance ()
 				dirj *= b->orient.inverse();
 				yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 				pitch = asin( dirj.y )*RADtoDEG;
-				b->target.z +=   yaw * m_Params.border_amt / d;
-				b->target.y += pitch * m_Params.border_amt / d;
+				b->target.z +=   yaw * m_Params.border_amt;
+				b->target.y += pitch * m_Params.border_amt;
 			}		
 
-
-			//--- Reynold's behaviors	
-			// Rule 1. Avoidance - avoid nearest bird
-			//			
-			// 1a. Side neighbor avoidance
-			if ( b->near_j != -1) {
-				// get nearest bird
-				bj = (Bird*) m_Birds.GetElem(0, b->near_j);
-				dirj = bj->pos - b->pos;
-				dist = dirj.Length();		  
+			if ( b->r_nbrs > 0 ) {
+				//--- Reynold's behaviors	
+				// Rule 1. Avoidance - avoid nearest bird
+				//			
+				// 1a. Side neighbor avoidance
+				if ( b->near_j != -1) {
+					// get nearest bird
+					bj = (Bird*) m_Birds.GetElem(0, b->near_j);
+					dirj = bj->pos - b->pos;
+					dist = dirj.Length();		  
 			
-				if ( dist < m_Params.safe_radius ) {	
+					if ( dist < m_Params.safe_radius ) {	
 
-					// Angular avoidance			
-					dirj = (dirj/dist) * b->orient.inverse();													
-					yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
-					pitch = asin( dirj.y )*RADtoDEG;		
-					dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));
-					b->target.z -= yaw *		m_Params.avoid_angular_amt * m_Params.DT / dist;
-					b->target.y -= pitch *  m_Params.avoid_angular_amt * m_Params.DT / dist;
+						// Angular avoidance			
+						dirj = (dirj/dist) * b->orient.inverse();													
+						yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
+						pitch = asin( dirj.y )*RADtoDEG;		
+						dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));
+						b->target.z -= yaw *		m_Params.avoid_angular_amt / dist;
+						b->target.y -= pitch *  m_Params.avoid_angular_amt / dist;
 
-					// Power adjust				
-					L = (b->vel.Length() - bj->vel.Length()) * m_Params.avoid_power_amt;
-					b->power = m_Params.avoid_power_ctr - L;  // * L;				
+						// Power adjust				
+						L = (b->vel.Length() - bj->vel.Length()) * m_Params.avoid_power_amt;
+						b->power = m_Params.avoid_power_ctr - L * L;				
 
-				}			
+					}			
+				}
+			
+				if (b->power < m_Params.min_power) b->power = m_Params.min_power;
+				if (b->power > m_Params.max_power) b->power = m_Params.max_power;	
+
+				// Rule 2. Alignment - orient toward average direction		
+				dirj = b->ave_vel;
+				dirj.Normalize();
+				dirj *= b->orient.inverse();		// using inverse orient for world-to-local xform
+				yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
+				pitch = asin( dirj.y )*RADtoDEG;
+				b->target.z += yaw   * m_Params.align_amt;
+				b->target.y += pitch * m_Params.align_amt;		 
+
+				// Rule 3. Cohesion - steer toward neighbor centroid
+				dirj = b->ave_pos - b->pos;		// direction to ave nbrs
+				dirj.Normalize();
+				dirj *= b->orient.inverse();	// world-to-local xform		
+				yaw = atan2( dirj.z, dirj.x )*RADtoDEG;  
+				pitch = asin( dirj.y )*RADtoDEG;
+				b->target.z += yaw   * m_Params.cohesion_amt;
+				b->target.y += pitch * m_Params.cohesion_amt;		
+		
 			}
-			
-			if (b->power < m_Params.min_power) b->power = m_Params.min_power;
-			if (b->power > m_Params.max_power) b->power = m_Params.max_power;	
-
-
-			// 1b. Incoming neighbor avoidance
-			// - avoid bird with opposiing velocity direction (incoming bird)
-			// - not necessary, covered by angular avoidance if dt is small enough
-			/* if ( b->near_in != -1 ) {
-				// get incoming bird
-				bj = (Bird*) m_Birds.GetElem(0, b->near_in);						
-				dirj = bj->pos - b->pos;
-				dist = dirj.Length();		
-
-				if ( dist < safe_radius ) {
-				
-					// Direct collision avoidance
-					//float s = (m_rnd.randF(0,1) < 0.5) ? 1 : -1;			
-					//b->target.z += (b->near_in_ang < 0 ) ? s : 0;		
-
-					// Power avoidance					
-					//vd = (b->vel.Length() + bj->vel.Length()) * 1.0;
-					//float np = 2 - pow(vd, 3);				
-					//b->power = np;			
-				
-				}					
-			} */
-
-			// Rule 2. Alignment - orient toward average direction		
-			dirj = b->ave_vel;
-			dirj.Normalize();
-			dirj *= b->orient.inverse();		// using inverse orient for world-to-local xform
-			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
-			pitch = asin( dirj.y )*RADtoDEG;
-			b->target.z += yaw   * m_Params.align_amt;
-			b->target.y += pitch * m_Params.align_amt;		 
-
-			// Rule 3. Cohesion - steer toward neighbor centroid
-			dirj = b->ave_pos - b->pos;		// direction to ave nbrs
-			dirj.Normalize();
-			dirj *= b->orient.inverse();	// world-to-local xform		
-			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;  
-			pitch = asin( dirj.y )*RADtoDEG;
-			b->target.z += yaw   * m_Params.cohesion_amt;
-			b->target.y += pitch * m_Params.cohesion_amt;		
-		
 		}
-		
 
 		//--- Flight model
 		//
@@ -1161,9 +1149,11 @@ void Sample::VisualizeSelectedBird ()
 
 		// visulize neighbors		
 		if (m_gpu) {
-			m_Birds.Retrieve ( FGCELL );
-			m_Grid.RetrieveAll ();
-			cuCtxSynchronize();
+			#ifdef BUILD_CUDA
+				m_Birds.Retrieve ( FGCELL );
+				m_Grid.RetrieveAll ();
+				cuCtxSynchronize();
+			#endif
 		}
 		int gc = m_Birds.bufUI(FGCELL)[ ndx ];
 		if ( gc != GRID_UNDEF ) {			
@@ -1325,8 +1315,11 @@ bool Sample::init ()
 	m_time = 0;
 	m_rnd.seed (12);
 	
-	//m_gpu = false;
-	m_gpu = true;
+	#ifdef BUILD_CUDA
+		m_gpu = true;
+  #else
+	  m_gpu = false;
+	#endif
 
 	m_kernels_loaded = false;
 
@@ -1343,7 +1336,9 @@ bool Sample::init ()
 
 	// [optional Start GPU
 	if (m_gpu) {
-		cuStart ( DEV_FIRST, 0, m_dev, m_ctx, 0, true );
+		#ifdef BUILD_CUDA
+			cuStart ( DEV_FIRST, 0, m_dev, m_ctx, 0, true );
+		#endif
 	}
 
 	// Initialize flock simulation
@@ -1351,14 +1346,17 @@ bool Sample::init ()
   
 	DefaultParams ();
 
-	Reset ( 20000 );
+	
+	int num_birds = 2000;
+
+	Reset ( num_birds );
 
 
 	// Camera
 	m_cam = new Camera3D;
 	m_cam->setFov ( 70 );
 	m_cam->setNearFar ( 1.0, 100000 );
-	m_cam->SetOrbit ( Vec3F(-30,30,0), Vec3F(0,50,0), 100, 1 );
+	m_cam->SetOrbit ( Vec3F(-30,30,0), Vec3F(0,50,0), 300, 1 );
 
 	// Background (static)
 	SetBackground ();
@@ -1374,7 +1372,7 @@ void Sample::SetBackground ()
 	start2D( w, h, true );	
 	if ( m_draw_vis ) {
 		// black background for vis
-		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
+		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(.4,.4,.4,1) );
 	} else {
 		// realistic sky
 		//drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
