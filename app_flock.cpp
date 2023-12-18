@@ -644,9 +644,6 @@ void Sample::FindNeighbors ()
 		uint*   fgc     = m_Grid.bufUI(FGCELL);
 
 		Bird *bi, *bj;
-	
-		float fov = cos ( 120 * RADtoDEG );
-		float fov_fwd = 60;
 
 		float ang, birdang;		
 		
@@ -711,7 +708,7 @@ void Sample::FindNeighbors ()
 								dirj = posj - posi; dirj.Normalize();
 								birdang = diri.Dot (dirj);
 
-								if ( birdang > fov ) {
+								if ( birdang > m_Params.fovcos ) {
 
 									// put into topological sorted list					
 									for (k = 0; dsq > sort_d_nbr[k] && k < sort_num;)
@@ -742,22 +739,28 @@ void Sample::FindNeighbors ()
 					}
 				}				
 		
+			// compute nearest and average among N (~7) topological neighbors
+			for (k=0; k < sort_num; k++) {
+				bj = (Bird*) m_Birds.GetElem( FBIRD, sort_j_nbr[k] );
+				bi->ave_pos += bj->pos;
+				bi->ave_vel += bj->vel;					
+			}
+			bi->near_j = sort_j_nbr[0];
+
+			if (bi->r_nbrs > 4) {
+				printf ( "%d %d\n", bi->r_nbrs, sort_num );
+				bool stop=true;
+			}
+
+			bi->t_nbrs = sort_num;
+			if (sort_num > 0 ) {
+				bi->ave_pos *= (1.0f / sort_num );
+				bi->ave_vel *= (1.0f / sort_num );
+			}
+
 		}
 
-		// compute nearest and average among N (~7) topological neighbors
-		for (k=0; k < sort_num; k++) {
-			bj = (Bird*) m_Birds.GetElem( FBIRD, sort_j_nbr[k] );
-			bi->ave_pos += bj->pos;
-			bi->ave_vel += bj->vel;					
-		}
-		bi->near_j = sort_j_nbr[0];
-
-		bi->t_nbrs = sort_num;
-		if (sort_num > 0 ) {
-			bi->ave_pos *= (1.0f / sort_num );
-			bi->ave_vel *= (1.0f / sort_num );
-		}
-
+		
 		m_centroid *= (1.0f / numPoints);
 	}
 }
