@@ -1462,11 +1462,11 @@ void Sample::display ()
 				// visualize velocity
 				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);							
 				//float v2 = (b->power - 2) / 2.0;
-				float v2 = b->ang_accel.Length() / 8.0;				
+				float v2 = b->ang_accel.Length() / 24.0;				
 				if (b->clr.w==0) {
-					drawLine3D ( b->pos,		b->pos + (b->vel*0.15f),	Vec4F(0, 1-v2, v2,1) );
+					drawLine3D ( b->pos,		b->pos + (b->vel*0.1f),	Vec4F(0, 1-v2, v2,1) );
 				} else {
-					drawLine3D ( b->pos,		b->pos + (b->vel*0.15f),	b->clr );
+					drawLine3D ( b->pos,		b->pos + (b->vel*0.1f),	b->clr );
 				}
 
 			} else {
