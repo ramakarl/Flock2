@@ -1333,7 +1333,7 @@ bool Sample::init ()
 	#endif
 
 	// override. use CPU 
-	m_gpu = false;
+	// m_gpu = false;
 
 
 	m_kernels_loaded = false;

@@ -1,15 +1,18 @@
 cmake_minimum_required(VERSION 2.8)
+set (CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR} CACHE PATH "")
+
 set(PROJNAME Flock2)
 Project(${PROJNAME})
 Message(STATUS "-------------------------------")
 Message(STATUS "Processing Project ${PROJNAME}:")
 
 #####################################################################################
-# LIBMIN Installed Path
+# LIBMIN Bootstrap
 #
-set ( LIBMIN_PATH "d:/codes/build/libmin" CACHE STRING "Location of Libmin")
-list( APPEND CMAKE_MODULE_PATH "${LIBMIN_PATH}/cmake" )
-list( APPEND CMAKE_PREFIX_PATH "${LIBMIN_PATH}/cmake" )
+get_filename_component ( LIBMIN_CMAKES "${CMAKE_CURRENT_SOURCE_DIR}/../libmin/cmake" REALPATH )
+set ( LIBMIN_CMAKES ${LIBMIN_CMAKES} CACHE PATH "")
+list( APPEND CMAKE_MODULE_PATH "${LIBMIN_CMAKES}" )
+list( APPEND CMAKE_PREFIX_PATH "${LIBMIN_CMAKES}" )
 
 #####################################################################################
 # Include LIBMIN
@@ -19,9 +22,8 @@ find_package(Libmin QUIET)
 if (NOT LIBMIN_FOUND)
 
   Message ( FATAL_ERROR "
-  This project requires Libmin. Build Libmin first.
-  Set the LIBMIN_PATH to the installed location (not the libmin source).
-  Libmin also provides the cmakes used to build this app. 
+  This project requires libmin. 
+  Set LIBMIN_CMAKES to the libmin repository path for /libmin/cmake.
   " )
 
 else()
@@ -59,19 +61,6 @@ _REQUIRE_CUDA( FALSE, "." )
 #--- symbols in release mode
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi" CACHE STRING "" FORCE)
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF" CACHE STRING "" FORCE)
-
-
-######################
-# CMAKE_INSTALL_PREFIX -- path where library will be installed to
-
-if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-   if ( WIN32 )
-      get_filename_component ( _instpath "${CMAKE_CURRENT_BINARY_DIR}" REALPATH )
-   else()
-      get_filename_component ( _instpath "/usr/local/shapes" REALPATH )
-   endif()
-   set ( CMAKE_INSTALL_PREFIX ${_instpath} CACHE PATH "default install path" FORCE)   
-endif()
 
 #####################################################################################
 # Asset Path
@@ -153,8 +142,9 @@ install ( FILES ${INSTALL_LIST} DESTINATION ${CMAKE_INSTALL_PREFIX} )		# exe, pd
 # Done
 message ( STATUS "CMAKE_CURRENT_SOURCE_DIR: ${CMAKE_CURRENT_SOURCE_DIR}" )
 message ( STATUS "CMAKE_CURRENT_BINARY_DIR: ${CMAKE_CURRENT_BINARY_DIR}" )
-message ( STATUS "INSTALL PATH:             ${CMAKE_INSTALL_PREFIX}" )
-
+message ( STATUS "------------------------------------")
+message ( STATUS "Flock2 Install Location:  ${CMAKE_INSTALL_PREFIX}" )
+message ( STATUS "------------------------------------")
 
 
 
