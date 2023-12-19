@@ -848,20 +848,21 @@ void Sample::Advance ()
 		for (int n=0; n < numPoints; n++) {
 
 			b = (Bird*) m_Birds.GetElem( FBIRD, n);
+
 			b->clr.Set(0,0,0,0);	
 
 			// Hoetzlein - Peripheral bird term
 			// Turn isolated birds toward flock centroid
 			float d = b->r_nbrs / m_Params.border_cnt;
-			if ( d > 0 && d < 1 ) { 
-				b->clr.Set(0,1,0, 1);	
+			if ( d < 1 ) {
+				b->clr.Set(1,.5,0, 1);	
 				dirj = centroid - b->pos; dirj.Normalize();
 				dirj *= b->orient.inverse();
 				yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 				pitch = asin( dirj.y )*RADtoDEG;
 				b->target.z +=   yaw * m_Params.border_amt;
 				b->target.y += pitch * m_Params.border_amt;
-			}		
+			}
 
 			if ( b->r_nbrs > 0 ) {
 				//--- Reynold's behaviors	
@@ -951,17 +952,23 @@ void Sample::Advance ()
 			if ( b->target.y < m_Params.pitch_min ) b->target.y = m_Params.pitch_min;
 			if ( b->target.y > m_Params.pitch_max ) b->target.y = m_Params.pitch_max;
 			if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
+
+			// Compute angular acceleration
+			// - as difference between current direction and desired direction
+			b->ang_accel.x = (b->target.x - angs.x);
+			b->ang_accel.y = (b->target.y - angs.y);
+			b->ang_accel.z = circleDelta(b->target.z, angs.z);
 		
 			// Roll - Control input
 			// - orient the body by roll
-			ctrlq.fromAngleAxis ( (b->target.x - angs.x) * m_Params.reaction_delay, fwd );
+			ctrlq.fromAngleAxis ( b->ang_accel.x * m_Params.reaction_delay, fwd );
 			b->orient *= ctrlq;	b->orient.normalize();
 
 			// Pitch & Yaw - Control inputs
 			// - apply 'torque' by rotating the velocity vector based on pitch & yaw inputs				
-			ctrlq.fromAngleAxis ( circleDelta(b->target.z, angs.z) * m_Params.reaction_delay, up * -1.f );
+			ctrlq.fromAngleAxis ( b->ang_accel.z * m_Params.reaction_delay, up * -1.f );
 			vaxis *= ctrlq; vaxis.Normalize();	
-			ctrlq.fromAngleAxis ( (b->target.y - angs.y) * m_Params.reaction_delay, right );
+			ctrlq.fromAngleAxis ( b->ang_accel.y * m_Params.reaction_delay, right );
 			vaxis *= ctrlq; vaxis.Normalize();
 
 			// Adjust velocity vector
@@ -1318,11 +1325,16 @@ bool Sample::init ()
 	m_time = 0;
 	m_rnd.seed (12);
 	
+	// enable GPU if cuda available
 	#ifdef BUILD_CUDA
 		m_gpu = true;
   #else
 	  m_gpu = false;
 	#endif
+
+	// override. use CPU 
+	m_gpu = false;
+
 
 	m_kernels_loaded = false;
 
@@ -1460,9 +1472,10 @@ void Sample::display ()
 			if ( m_draw_vis ) {
 				
 				// visualize velocity
-				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);							
+				float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);
 				//float v2 = (b->power - 2) / 2.0;
-				float v2 = b->ang_accel.Length() / 24.0;				
+				float v2 = b->ang_accel.Length() / 24.0;
+
 				if (b->clr.w==0) {
 					drawLine3D ( b->pos,		b->pos + (b->vel*0.1f),	Vec4F(0, 1-v2, v2,1) );
 				} else {
