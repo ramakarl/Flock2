@@ -9,10 +9,9 @@ Message(STATUS "Processing Project ${PROJNAME}:")
 #####################################################################################
 # LIBMIN Bootstrap
 #
-get_filename_component ( LIBMIN_CMAKES "${CMAKE_CURRENT_SOURCE_DIR}/../libmin/cmake" REALPATH )
-set ( LIBMIN_CMAKES ${LIBMIN_CMAKES} CACHE PATH "")
-list( APPEND CMAKE_MODULE_PATH "${LIBMIN_CMAKES}" )
-list( APPEND CMAKE_PREFIX_PATH "${LIBMIN_CMAKES}" )
+get_filename_component ( LIBMIN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../libmin/" REALPATH )
+list( APPEND CMAKE_MODULE_PATH "${LIBMIN_ROOT}/cmake" )
+list( APPEND CMAKE_PREFIX_PATH "${LIBMIN_ROOT}/cmake" )
 
 #####################################################################################
 # Include LIBMIN
