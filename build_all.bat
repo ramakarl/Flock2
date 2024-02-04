@@ -32,11 +32,13 @@ cmake -S flock2 -B build/flock2 -DLIBMIN_INSTALL=build/libmin
 cd build/flock2
 msbuild flock2.sln /p:Configuration=Debug
 msbuild flock2.sln /p:Configuration=Release
+cd ../../flock2
 
 REM ################################### DONE
 REM ### Update and build complete.
-REM ### To run flock2 debug:   flock2d.exe 
-REM ### To run flock2 release: flock2.exe 
+REM ### To run flock2 debug, type:   ..\build\flock2\flock2d.exe 
+REM ### To run flock2 release, type: ..\build\flock2\flock2.exe 
+REM
 
 
 
