@@ -1,6 +1,7 @@
 
+REM ### Set path to your Visual Studio version here
 
-REM ################################### Starting in Flock2 folder
+path=%path%;"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin"
 
 
 REM ################################### Downloading or updating Libmin
@@ -14,8 +15,6 @@ cd ..
 REM ################################### Building Libmin
 
 cmake -S libmin -B build/libmin
-
-path=%path%;"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin"
 
 cd build/libmin
 msbuild libmin.sln /p:Configuration=Debug
