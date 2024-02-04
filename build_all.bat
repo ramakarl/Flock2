@@ -5,7 +5,7 @@ REM ################################### Starting in Flock2 folder
 
 REM ################################### Downloading or updating Libmin
 cd ..
-git clone libmin https://github.com/ramakarl/libmin.git
+git clone https://github.com/ramakarl/libmin.git
 cd libmin
 git pull
 cd ..
