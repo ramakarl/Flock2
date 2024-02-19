@@ -1495,7 +1495,7 @@ void Sample::display ()
 		Vec4F tc (1,1,1,1);
 		sprintf ( msg, "t=%4.3f sec", m_time );
 		setTextSz ( 24, 0 );
-	  drawText ( Vec2F(10, 10), "hello world", tc );
+	  drawText ( Vec2F(10, 10), msg, tc );
 		
 		if ( m_bird_sel != -1) {
 			
