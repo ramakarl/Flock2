@@ -90,7 +90,7 @@ public:
 	void			CameraToBird ( int b );
 	void			CameraToCockpit( int b );
 	void			CameraToCentroid ();
-	void			SetBackground();
+	void			drawBackground();
 	void			drawGrid( Vec4F clr );
 
 	// acceleration
@@ -1336,12 +1336,10 @@ bool Sample::init ()
 
 	m_bird_sel = -1;
 	
-
-	// addSearchPath ( ASSET_PATH );	
+	addSearchPath ( ASSET_PATH );	
 
 	init2D ( "arial" );
-	setview2D ( w, h );	
-	setTextSz ( 20, 1 );		
+
 
 	InitGraphs ();
 
@@ -1369,18 +1367,13 @@ bool Sample::init ()
 	m_cam->setNearFar ( 1.0, 100000 );
 	m_cam->SetOrbit ( Vec3F(-30,30,0), Vec3F(0,50,0), 300, 1 );
 
-	// Background (static)
-	SetBackground ();
-
 	return true;
 }
 
-
-void Sample::SetBackground ()
+void Sample::drawBackground ()
 {
 	int w = getWidth(), h = getHeight();
-	clear2D();
-	start2D( w, h, true );	
+	
 	if ( m_draw_vis ) {
 		// black background for vis
 		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(.4,.4,.4,1) );
@@ -1389,7 +1382,6 @@ void Sample::SetBackground ()
 		//drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
 		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
 	}
-	end2D();
 }
 
 void Sample::display ()
@@ -1428,6 +1420,10 @@ void Sample::display ()
 		glClearColor(.8,.8,.9,1);
 	}
 	clearGL();
+
+	start2D( w, h);
+		drawBackground ();
+	end2D();
 
 	start3D(m_cam);		
 
@@ -1491,21 +1487,15 @@ void Sample::display ()
 				drawTri3D ( p, q, r, t, Vec4F(1,1,1,1) );
 			}
 		
-
-			/*drawLine3D ( b->pos,	  b->pos+x,					Vec4F(1,1,0,  1) );					// fwd				
-			drawLine3D ( b->pos,		b->pos +b->lift + x*0.1f,		Vec4F(0,1,0,  1) );	// lift (green)
-			drawLine3D ( b->pos,		b->pos+b->thrust, Vec4F(1,0,0,  1) );						// thrust (red)
-			drawLine3D ( b->pos,		b->pos+b->drag,		Vec4F(1,0,1,  1) );			
-			drawLine3D ( b->pos,		b->pos+b->force,	Vec4F(0,1,1,  1) );			*/		
-
 		}
-	end3D();
+	end3D(); 
 
 	start2D ( w, h );
 	
-		Vec4F tc (0,0,0,1);
+		Vec4F tc (1,1,1,1);
 		sprintf ( msg, "t=%4.3f sec", m_time );
-	  drawText ( Vec2F(10, 10), msg, tc );
+		setTextSz ( 24, 0 );
+	  drawText ( Vec2F(10, 10), "hello world", tc );
 		
 		if ( m_bird_sel != -1) {
 			
@@ -1618,8 +1608,7 @@ void Sample::keyboard(int keycode, AppEnum action, int mods, int x, int y)
 
 	switch ( keycode ) {
 	case 'v': 
-		m_draw_vis = !m_draw_vis;
-		SetBackground();
+		m_draw_vis = !m_draw_vis;	
 		break;
 	case 's': m_draw_sphere = !m_draw_sphere; break;
 	case 'g': m_draw_grid = !m_draw_grid; break;

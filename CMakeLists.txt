@@ -66,8 +66,7 @@ set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OP
 #
 if ( NOT DEFINED ASSET_PATH ) 
    get_filename_component ( _assets "${CMAKE_CURRENT_SOURCE_DIR}/assets" REALPATH )
-   set ( ASSET_PATH ${_assets} CACHE PATH "Full path to /assets" )
-   add_definitions( -DASSET_PATH="${ASSET_PATH}/" )
+   set ( ASSET_PATH ${_assets} CACHE PATH "Full path to /assets" )   
 endif()
 file(GLOB GLSL_FILES ${ASSET_PATH}/*.glsl )
 add_definitions(-DASSET_PATH="${ASSET_PATH}/")
