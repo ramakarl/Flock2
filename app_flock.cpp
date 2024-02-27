@@ -31,6 +31,11 @@
 #include "common_cuda.h"
 #include "geom_helper.h"
 
+#include <fstream>
+#include <iostream>
+
+using namespace std;
+
 #define DEBUG_CUDA		true	
 //#define DEBUG_BIRD		7
 
@@ -55,9 +60,9 @@ struct graph_t {
 };
 #define GRAPH_BANK		0
 #define GRAPH_PITCH		1
-#define GRAPH_VEL			2
+#define GRAPH_VEL		2
 #define GRAPH_ACCEL		3
-#define GRAPH_MAX			4
+#define GRAPH_MAX		4
 
 // Application
 //
@@ -73,14 +78,17 @@ public:
 	virtual void mousewheel(int delta);
 	virtual void shutdown();
 
-	Bird*			AddBird ( Vec3F pos, Vec3F vel, Vec3F target, float power );	
+	Bird*		AddBird ( Vec3F pos, Vec3F vel, Vec3F target, float power );
+	Predator*	AddPredator(Vec3F pos, Vec3F vel, Vec3F target, float power);		//----------
 	
 	// simulation
 	void			DefaultParams ();
-	void			Reset (int num_bird );	
-	void		  Run ();
+	void			Reset (int num_bird, int num_pred);	
+	void			Run ();
 	void			FindNeighbors ();	
-	void			Advance ();		
+	void			Advance ();	
+	void 			Advance_pred();		//-------
+	void			TrackBird();		//-------
 	
 	// rendering
 	void			SelectBird (float x, float y);
@@ -99,29 +107,42 @@ public:
 	void			PrefixSumGrid ();
 	void			DrawAccelGrid ();	
 
+	void			transitionPredState(int centroidReached, predState& currentState);
+	int				centroidReached;
+
 	DataX			m_Birds;
+	DataX			m_Predators;	//-------
 	DataX			m_BirdsTmp;
 	DataX			m_Grid;
 	Accel			m_Accel;
-	Params		m_Params;
+	Params			m_Params;
 
-	Mersenne  m_rnd;	
+	Mersenne		m_rnd;	
 
 	Vec3F			m_centroid;
+	Vec3F			m_predcentroid;	//-------
 
 	float			m_time;
 	bool			m_run;
 	int				m_cam_mode;
 	bool			m_cam_adjust;
-	Camera3D*	m_cam;
+	Camera3D*		m_cam;
 	Vec3F			m_cam_fwd;
 	int				mouse_down;
-	int			  m_bird_sel, m_bird_ndx;
-	bool		  m_cockpit_view;
+	int				m_bird_sel, m_bird_ndx;
+	bool			m_cockpit_view;
 	bool			m_draw_sphere;
-	bool		  m_draw_grid;
+	bool			m_draw_grid;
 	bool			m_draw_vis;
 	bool			m_gpu, m_kernels_loaded;
+
+	ofstream outputFile;		// output data file
+
+	int				bird_index;		//-------
+	float			closest_bird;	//-------
+	int				bird_count = 0;		//-------
+	int				runcount = 0;
+
 
 	std::vector< vis_t >  m_vis;
 	std::vector< graph_t> m_graph;
@@ -189,10 +210,38 @@ Bird* Sample::AddBird ( Vec3F pos, Vec3F vel, Vec3F target, float power )
 	b.orient.normalize();
 	b.orient.toEuler ( angs );			
 	
-	m_Birds.SetElem (0, ndx, &b );
+	m_Birds.SetElem (FBIRD, ndx, &b );
 
 	return (Bird*) m_Birds.GetElem( FBIRD, ndx);
 }
+
+Predator* Sample::AddPredator(Vec3F pos, Vec3F vel, Vec3F target, float power)	// **** copy of "AddBird"
+{
+	Vec3F dir, angs;
+
+	int ndx = m_Predators.AddElem(FPREDATOR);
+
+	Predator p;
+	p.id = ndx;
+	p.pos = pos;
+	p.vel = vel;
+	p.target = target;
+	p.power = power;
+	p.pitch_adv = 0;
+	p.accel.Set(0, 0, 0);
+
+	dir = p.vel; dir.Normalize();
+	p.orient.fromDirectionAndUp(dir, Vec3F(0, 1, 0));
+	p.orient.normalize();
+	p.orient.toEuler(angs);
+
+	p.currentState = HOVER;
+
+	m_Predators.SetElem(FPREDATOR, ndx, &p);
+	//printf("Predator is added at: %f, %f, %f \n", p.pos.x, p.pos.y, p.pos.z);
+
+	return (Predator*)m_Predators.GetElem(FPREDATOR, ndx);
+} // ****
 
 int iDivUp (int a, int b) {
     return (a % b != 0) ? (a / b + 1) : (a / b);
@@ -210,69 +259,92 @@ void Sample::DefaultParams ()
 	// SI units:
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
-	m_Params.steps =						2;
-	m_Params.DT =								0.005;									// timestep (sec), .005 = 200 hz
-	m_Params.mass =							0.1;										// bird mass (kg)
-	m_Params.min_speed =				5;											// min speed (m/s)
-	m_Params.max_speed =				18;											// max speed (m/s)
-	m_Params.min_power =				-20;										// min power (N)
-	m_Params.max_power =				20;											// max power (N)
-	m_Params.wind =							Vec3F(0,0,0);						// wind direction & strength
-	m_Params.fov =							130;										// bird field-of-view (degrees)
+	m_Params.steps = 2;
+	m_Params.DT = 0.005;						// timestep (sec), .005 = 200 hz
+	m_Params.mass =	0.1;						// bird mass (kg)
+	m_Params.pred_mass = 0.8;
+	m_Params.min_speed = 7.2;						// min speed (m/s)		// Demsar2014
+	m_Params.max_speed = 18;					// max speed (m/s)		// Demsar2014
+	m_Params.max_predspeed = 22;										//(m/s)-------Demsar2014
+	m_Params.min_predspeed = 8.8;										//(m/s)-------Demsar2014
+	m_Params.min_power = -20;					// min power (N)
+	m_Params.max_power = 20;					// max power (N)
+	m_Params.wind =	Vec3F(0,0,0);				// wind direction & strength
+	m_Params.fov = 130;							// bird field-of-view (degrees)
 	m_Params.fovcos = cos ( m_Params.fov * DEGtoRAD );
 
-	m_Params.lift_factor =			0.100;									// lift factor
-	m_Params.drag_factor =			0.002;									// drag factor
-	m_Params.safe_radius =			2.0;										// radius of avoidance (m)
-	m_Params.border_cnt =				30;											// border width (# birds)
-	m_Params.border_amt =				0.08f;									// border steering amount (keep <0.1)
+	m_Params.lift_factor = 0.100;				// lift factor
+	m_Params.drag_factor = 0.002;				// drag factor
+	m_Params.safe_radius = 2.0;					// radius of avoidance (m)
+	m_Params.border_cnt = 30;					// border width (# birds)
+	m_Params.border_amt = 0.08f;				// border steering amount (keep <0.1)
 	
-	m_Params.avoid_angular_amt= 0.02f;									// bird angular avoidance amount
-	m_Params.avoid_power_amt =	0.02f;								 		// power avoidance amount (N)
-	m_Params.avoid_power_ctr =	3;											// power avoidance center (N)
+	m_Params.avoid_angular_amt= 0.02f;			// bird angular avoidance amount
+	m_Params.avoid_power_amt =	0.02f;			// power avoidance amount (N)
+	m_Params.avoid_power_ctr =	3;				// power avoidance center (N)
 	
-	m_Params.align_amt =				0.700f;									// bird alignment amount
+	m_Params.align_amt = 0.700f;				// bird alignment amount
 
-	m_Params.cohesion_amt =			0.0001f;								// bird cohesion amount
+	m_Params.cohesion_amt =	0.0001f;			// bird cohesion amount
 
-	m_Params.pitch_decay =			0.999;									// pitch decay (return to level flight)
-	m_Params.pitch_min =				-40;										// min pitch (degrees)
-	m_Params.pitch_max =				40;											// max pitch (degrees)
+	m_Params.pitch_decay = 0.999;				// pitch decay (return to level flight)
+	m_Params.pitch_min = -40;					// min pitch (degrees)
+	m_Params.pitch_max = 40;					// max pitch (degrees)
 	
-	m_Params.reaction_delay =		0.0020f;								// reaction delay
+	m_Params.reaction_delay = 0.0020f;			// reaction delay
 
-	m_Params.dynamic_stability = 0.6f;									// dyanmic stability factor
-	m_Params.air_density =			1.225;									// air density (kg/m^3)
-	m_Params.gravity =					Vec3F(0, -9.8, 0);			// gravity (m/s^2)
-	m_Params.front_area =				0.1f;										// section area of bird into wind
-	m_Params.bound_soften	=			20;											// ground detection range
-	m_Params.avoid_ground_power = 3;										// ground avoid power setting 
-	m_Params.avoid_ground_amt = 0.5f;										// ground avoid strength
-	m_Params.avoid_ceil_amt =   0.1f;										// ceiling avoid strength
+	m_Params.dynamic_stability = 0.6f;			// dyanmic stability factor
+	m_Params.air_density = 1.225;				// air density (kg/m^3)
+	m_Params.gravity = Vec3F(0, -9.8, 0);		// gravity (m/s^2)
+	m_Params.front_area = 0.1f;					// section area of bird into wind
+	m_Params.bound_soften = 20;					// ground detection range
+	m_Params.avoid_ground_power = 3;			// ground avoid power setting 
+	m_Params.avoid_ground_amt = 0.5f;			// ground avoid strength
+	m_Params.avoid_ceil_amt = 0.1f;				// ceiling avoid strength
+
+	// predator
+	m_Params.pred_radius = 6.0;						// detection radius of predator for birds
+	//m_Params.pred_flee_speed = m_Params.max_speed;	// bird speed to get away from predator
+
+	m_Params.avoid_pred_angular_amt = 0.02f;			// bird angular avoidance amount w.r.t. predator
+	m_Params.avoid_pred_power_amt = 0.04f;				// power avoidance amount (N) w.r.t. predator
+	m_Params.avoid_pred_power_ctr = 3;					// power avoidance center (N) w.r.t. predator
+
+	m_Params.fov_pred = 120; // degrees
+	m_Params.fovcos_pred = cos(m_Params.fov_pred * DEGtoRAD);
 	
 }
 
 
-void Sample::Reset (int num )
+void Sample::Reset (int num, int num_pred )
 {
 	Vec3F pos, vel;
 	float h;
 	int grp;
 	Bird* b;
+	Predator* p;
 
 	// Global flock variables
 	//
 	m_Params.num_birds = num;
+	m_Params.num_predators = num_pred; 	// ****
 	
 	// Initialized bird memory
 	//
 	int numPoints = m_Params.num_birds;
+	int numPoints_pred = m_Params.num_predators; // ****
 	uchar usage = (m_gpu) ? DT_CPU | DT_CUMEM : DT_CPU;
 
 	m_Birds.DeleteAllBuffers ();
 	m_Birds.AddBuffer ( FBIRD,  "bird",		sizeof(Bird),	numPoints, usage );
 	m_Birds.AddBuffer ( FGCELL, "gcell",	sizeof(uint),	numPoints, usage );
-	m_Birds.AddBuffer ( FGNDX,  "gndx",		sizeof(uint),	numPoints, usage );		
+	m_Birds.AddBuffer ( FGNDX,  "gndx",		sizeof(uint),	numPoints, usage );	
+
+	// -------- PREDATOR -----
+	m_Predators.DeleteAllBuffers();
+	m_Predators.AddBuffer(FPREDATOR, "predator", sizeof(Predator), numPoints_pred, usage);
+	m_Predators.AddBuffer(FGCELL_pred, "gcell_p", sizeof(uint), numPoints_pred, usage);
+	m_Predators.AddBuffer(FGNDX_pred, "gndx_p", sizeof(uint), numPoints_pred, usage);
 
 	// Add birds
 	//
@@ -300,6 +372,22 @@ void Sample::Reset (int num )
 		h = m_rnd.randF(-180, 180);
 		b = AddBird ( pos, vel, Vec3F(0, 0, h), 3);  
 		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f ); 	
+
+	}
+
+	// **** add predators
+
+	for (int n = 0; n < numPoints_pred; n++) {
+		// randomly distribute predators
+		pos = m_rnd.randV3(-50, 50);
+		pos.y = pos.y * .5f + 50;
+		vel = m_rnd.randV3(-20, 20);
+		h = m_rnd.randF(-180, 180);
+
+		//p = AddPredator(Vec3F(n+1, 0, 0), Vec3F(0, 0, 0), Vec3F(0, 0, h), 3);				// add static predator; (0,0,0) for pos does not work
+		p = AddPredator(pos, vel, Vec3F(0, 0, h), 3);
+		printf("Predator is added at: %f, %f, %f \n", p->pos.x, p->pos.y, p->pos.z);
+		p->clr = Vec4F(0.804, 0.961, 0.008, 1);
 
 	}
 	
@@ -353,6 +441,7 @@ void Sample::Reset (int num )
 	#endif
 
 	printf ( "Added %d birds.\n", m_Params.num_birds );
+	printf("Added %d predators.\n", m_Params.num_predators);
 }
 
 
@@ -421,18 +510,22 @@ void Sample::InitializeGrid ()
 	int numElem3 = int ( numElem2 / blockSize ) + 1;
 
 	int numPoints = m_Params.num_birds;
+	int numPoints_pred = m_Params.num_predators; 		// ******
 
 	int mem_usage = (m_gpu) ? DT_CPU | DT_CUMEM : DT_CPU;
 
 	// Allocate acceleration
 	m_Grid.DeleteAllBuffers ();
-	m_Grid.AddBuffer ( AGRID,		  "grid",			sizeof(uint), numPoints,					mem_usage );
-	m_Grid.AddBuffer ( AGRIDCNT,	"gridcnt",	sizeof(uint), m_Accel.gridTotal,	mem_usage );
-	m_Grid.AddBuffer ( AGRIDOFF,	"gridoff",	sizeof(uint), m_Accel.gridTotal,	mem_usage );
-	m_Grid.AddBuffer ( AAUXARRAY1, "aux1",		sizeof(uint), numElem2,						mem_usage );
-	m_Grid.AddBuffer ( AAUXSCAN1,  "scan1",		sizeof(uint), numElem2,						mem_usage );
-	m_Grid.AddBuffer ( AAUXARRAY2, "aux2",		sizeof(uint), numElem3,						mem_usage );
-	m_Grid.AddBuffer ( AAUXSCAN2,  "scan2",		sizeof(uint), numElem3,						mem_usage );
+	m_Grid.AddBuffer ( AGRID, "grid", sizeof(uint), numPoints, mem_usage );
+	m_Grid.AddBuffer ( AGRIDCNT, "gridcnt",	sizeof(uint), m_Accel.gridTotal, mem_usage );
+	m_Grid.AddBuffer (AGRIDCNT_pred, "gridcnt_pred", sizeof(uint), m_Accel.gridTotal, mem_usage); // *****
+	m_Grid.AddBuffer ( AGRIDOFF, "gridoff",	sizeof(uint), m_Accel.gridTotal, mem_usage );
+	m_Grid.AddBuffer ( AAUXARRAY1, "aux1", sizeof(uint), numElem2, mem_usage );
+	m_Grid.AddBuffer ( AAUXSCAN1, "scan1", sizeof(uint), numElem2, mem_usage );
+	m_Grid.AddBuffer ( AAUXARRAY2, "aux2", sizeof(uint), numElem3, mem_usage );
+	m_Grid.AddBuffer ( AAUXSCAN2, "scan2", sizeof(uint), numElem3, mem_usage );
+	m_Grid.AddBuffer (AGRID_pred, "grid_pred", sizeof(uint), numPoints_pred, mem_usage);		// ***** 
+	
 
 	for (int b=0; b <= AAUXSCAN2; b++)
 		m_Grid.SetBufferUsage ( b, DT_UINT );		// for debugging
@@ -452,6 +545,8 @@ void Sample::InitializeGrid ()
 void Sample::InsertIntoGrid ()
 {
 	int numPoints = m_Params.num_birds;
+	int numPoints_pred = m_Params.num_predators; 		// *****
+
 
 	if (m_gpu) {
 
@@ -473,9 +568,12 @@ void Sample::InsertIntoGrid ()
 		// Insert into grid 
 		// Reset all grid cells to empty		
 		memset( m_Grid.bufUI(AGRIDCNT),	0,	m_Accel.gridTotal*sizeof(uint));
+		memset( m_Grid.bufUI(AGRIDCNT_pred), 0, m_Accel.gridTotal * sizeof(uint)); // ****
 		memset( m_Grid.bufUI(AGRIDOFF),	0,	m_Accel.gridTotal*sizeof(uint));
 		memset( m_Birds.bufUI(FGCELL),	0,	numPoints*sizeof(int));
-		memset( m_Birds.bufUI(FGNDX),		0,	numPoints*sizeof(int));
+		memset( m_Birds.bufUI(FGNDX),	0,	numPoints*sizeof(int));
+		memset( m_Predators.bufUI(FGCELL_pred), 0, numPoints_pred * sizeof(int)); // ****
+		memset( m_Predators.bufUI(FGNDX_pred), 0, numPoints_pred * sizeof(int));	 // ****
 
 		float poff = m_Accel.psmoothradius / m_Accel.sim_scale;
 
@@ -508,6 +606,38 @@ void Sample::InsertIntoGrid ()
 			pgcell++;
 			pgndx++;		
 		}
+
+		// Insert each predator particle into spatial grid
+		Vec3F gcf_p;
+		Vec3I gc_p;
+		int gs_p;
+		Vec3F ppos_p;
+		uint* pgcell_pred = m_Predators.bufUI(FGCELL_pred);	// ****
+		uint* pgndx_pred = m_Predators.bufUI(FGNDX_pred);		// ****
+
+		Predator* p; 		// ****
+
+		for (int n = 0; n < numPoints_pred; n++) {
+
+			p = (Predator*)m_Predators.GetElem(FPREDATOR, n);
+			ppos_p = p->pos;
+
+			gcf_p = (ppos_p - m_Accel.gridMin) * m_Accel.gridDelta;
+			gc_p = Vec3I(int(gcf_p.x), int(gcf_p.y), int(gcf_p.z));
+			gs_p = (gc_p.y * m_Accel.gridRes.z + gc_p.z) * m_Accel.gridRes.x + gc_p.x;
+
+			if (gc_p.x >= 1 && gc_p.x <= m_Accel.gridScanMax.x && gc_p.y >= 1 && gc_p.y <= m_Accel.gridScanMax.y && gc_p.z >= 1 && gc_p.z <= m_Accel.gridScanMax.z) {
+				*pgcell_pred = gs_p;
+				*pgndx_pred = *m_Grid.bufUI(AGRIDCNT_pred, gs_p);
+				(*m_Grid.bufUI(AGRIDCNT_pred, gs_p))++;
+			}
+			else {
+				*pgcell_pred = GRID_UNDEF;
+			}
+			pgcell_pred++;
+			pgndx_pred++;
+		}
+
 	}
 
 }
@@ -578,9 +708,12 @@ void Sample::PrefixSumGrid ()
 		// *except* that birds are not deep copied for cache coherence as they are on gpu.
 		// the grid cells will contain the same list of points in either case.
 		int numPoints = m_Params.num_birds;
+		int numPoints_pred = m_Params.num_predators;		// *****
 		int numCells = m_Accel.gridTotal;
 		uint* mgrid = (uint*) m_Grid.bufI(AGRID);
+		uint* mgrid_pred = (uint*)m_Grid.bufI(AGRID_pred); // ****
 		uint* mgcnt = (uint*) m_Grid.bufI(AGRIDCNT);
+		uint* mgcnt_pred = (uint*)m_Grid.bufI(AGRIDCNT_pred); // ****
 		uint* mgoff = (uint*) m_Grid.bufI(AGRIDOFF);
 
 		// compute prefix sums for offsets
@@ -591,8 +724,8 @@ void Sample::PrefixSumGrid ()
 		}
 
 		// compute master grid list
-		uint* pgcell =	  m_Birds.bufUI (FGCELL);
-		uint* pgndx =			m_Birds.bufUI (FGNDX);		
+		uint* pgcell = m_Birds.bufUI (FGCELL);
+		uint* pgndx = m_Birds.bufUI (FGNDX);		
 		int gs, sort_ndx;
 		for (int k=0; k < numPoints; k++) {
 			mgrid[k] = GRID_UNDEF;
@@ -606,6 +739,33 @@ void Sample::PrefixSumGrid ()
 			pgcell++;
 			pgndx++;
 		}
+
+		// ------- PREDATOR ------------------
+		// compute prefix sums for offsets
+		int sum_pred = 0;
+		for (int n = 0; n < numCells; n++) {
+			mgoff[n] = sum_pred;
+			sum_pred += mgcnt_pred[n];
+		}
+
+		uint* pgcell_pred = m_Predators.bufUI(FGCELL_pred);		// ****
+		uint* pgndx_pred = m_Predators.bufUI(FGNDX_pred);		// ****
+
+		//int gs_pred;
+		int sort_ndx_pred;							// ****
+		for (int k = 0; k < numPoints_pred; k++) {
+			mgrid_pred[k] = GRID_UNDEF;
+		}
+		for (int j = 0; j < numPoints_pred; j++) {
+
+			if (*pgcell_pred != GRID_UNDEF) {
+				sort_ndx_pred = mgoff[*pgcell_pred] + *pgndx_pred;
+				mgrid_pred[sort_ndx_pred] = j;
+			}
+			pgcell_pred++;
+			pgndx_pred++;
+		}
+
 	}
 }
 
@@ -640,9 +800,9 @@ void Sample::FindNeighbors ()
 		float dsq;
 		float nearest, nearest_fwd;
 	
-		uint*		grid		=	m_Grid.bufUI(AGRID);
-		uint*		gridcnt = m_Grid.bufUI(AGRIDCNT);
-		uint*   fgc     = m_Grid.bufUI(FGCELL);
+		uint* grid = m_Grid.bufUI(AGRID);
+		uint* gridcnt = m_Grid.bufUI(AGRIDCNT);
+		uint* fgc = m_Grid.bufUI(FGCELL);
 
 		Bird *bi, *bj;
 
@@ -695,6 +855,7 @@ void Sample::FindNeighbors ()
 
 							// get next possible neighbor
 							j = m_Grid.bufUI(AGRID)[cndx];
+							if (j >= numPoints) continue;
 							if (i==j) continue;
 							bj = (Bird*) m_Birds.GetElem( FBIRD, j );
 							posj = bj->pos;
@@ -760,8 +921,75 @@ void Sample::FindNeighbors ()
 		m_centroid *= (1.0f / numPoints);
 	}
 }
+//----------------------------------------------------------------
+void Sample::TrackBird() {
 
+	float d = m_Accel.sim_scale;
+	float d2 = d * d;
+	float rd2 = (m_Accel.psmoothradius * m_Accel.psmoothradius) / d2;
+	int	nadj = (m_Accel.gridRes.z + 1) * m_Accel.gridRes.x + 1;
+	//uint j, cell;
+	Vec3F bpos, ppos, dist;
+	Vec3F diri, dirj;
+	Vec3F cdir;
+	//float dsq;
+	//float nearest, nearest_fwd;
+	float disti;
 
+	uint* grid = m_Grid.bufUI(AGRID);
+	uint* gridcnt = m_Grid.bufUI(AGRIDCNT);
+	uint* fgc = m_Grid.bufUI(FGCELL);
+
+	Bird* b;
+	Predator* p;
+	float closest;
+	float predang;
+	//float birdang;
+
+	int numPoints = m_Params.num_birds;
+	int numPoints_pred = m_Params.num_predators;
+
+	for (int i = 0; i < numPoints_pred; i++) {
+		p = (Predator*)m_Predators.GetElem(FPREDATOR, i);
+		ppos = p->pos;
+		closest = 1000;
+		for (int j = 0; j < numPoints; j++) {
+			b = (Bird*)m_Birds.GetElem(FBIRD, j);
+			bpos = b->pos;
+			// printf("pposj = %f, %f, %f ; ", pposj.x, pposj.y, pposj.z);
+
+			dist = bpos - ppos;
+			disti = dist.Length();
+
+			dirj = dist.Normalize();
+			diri = p->vel; diri.Normalize();
+			predang = diri.Dot(dirj);
+
+			if (disti < closest && predang > m_Params.fovcos_pred) {		// added predang, similar to findneighbors.birdang
+				printf("dist = %f; bird: %i; predang: %f\n\n", disti, j, predang);
+				bird_index = j;
+				closest = disti;
+				closest_bird = closest;
+
+			}
+		}
+		// b = (Bird*)m_Birds.GetElem(FBIRD,bird_index);
+		// b->clr = Vec4F(0,0,1,1);
+	}
+}
+
+void Sample::transitionPredState(int centroidReached, predState& currentState) {
+	// printf("Entered transition.\n");
+	if (centroidReached == 1) {
+		currentState = HOVER;
+	}
+	else if (centroidReached == 2) {
+		currentState = ATTACK;
+	}
+	else if (centroidReached == 3) {
+		currentState = FOLLOW;
+	}
+}
 
 float circleDelta (float b, float a)
 {	
@@ -833,10 +1061,12 @@ void Sample::Advance ()
 		Vec3F angs;
 		Quaternion angvel;
 		Bird *b, *bj, *bfwd;
+		Predator* p;
 		bool leader;
 		float ave_yaw;
 
 		int numPoints = m_Params.num_birds;
+		int numPoints_pred = m_Params.num_predators;
 
 		Vec3F centroid (0,50,0);
 
@@ -909,6 +1139,28 @@ void Sample::Advance ()
 				b->target.z += yaw   * m_Params.cohesion_amt;
 				b->target.y += pitch * m_Params.cohesion_amt;		
 		
+			} // RULE 4: bird-predator behaviour
+
+			///*
+			for (int m = 0; m < numPoints_pred; m++) {
+				p = (Predator*)m_Predators.GetElem(FPREDATOR, m);
+				Vec3F predatorDir = p->pos - b->pos;
+				float predatorDist = predatorDir.Length();
+
+				if (predatorDist < m_Params.pred_radius) {
+					// Flee from predator
+					//predatorDir.Normalize();
+
+					predatorDir = (predatorDir / predatorDist) * b->orient.inverse();
+					yaw = atan2(predatorDir.z, predatorDir.x) * RADtoDEG;
+					pitch = asin(predatorDir.y) * RADtoDEG;
+					predatorDist = fmax(1.0f, fmin(predatorDist * predatorDist, 100.0f));
+					b->target.z -= yaw * m_Params.avoid_pred_angular_amt; // / predatorDist;
+					b->target.y -= pitch * m_Params.avoid_pred_angular_amt; // / predatorDist;
+					b->clr = Vec4F(1, 0, 1, 1);
+					bird_count += 1;
+				}
+				
 			}
 		}
 
@@ -1062,6 +1314,224 @@ void Sample::Advance ()
 	
 }
 
+// -----------------------PREDATOR------------------------- 
+
+void Sample::Advance_pred() {
+	int numPoints_pred = m_Params.num_predators;
+	// Advance - CPU
+	//
+	Vec3F   fwd, up, right, vaxis;
+	Vec3F   force, lift, drag, thrust, accel;
+	Vec3F   diri, dirj, unNormDirj, dirf;
+	Quaternion ctrl_pitch;
+	float   airflow, dynamic_pressure, aoa;
+	float   L, dist, unNormDist, distbird;
+	float   pitch, yaw;
+	Quaternion ctrlq, tq;
+	Vec3F   angs;
+	Quaternion angvel;
+	//Bird *b, *bj, *bfwd;
+	Predator* p, * pj;
+	yaw = 0;
+	pitch = 0;
+	m_predcentroid.Set(0, 25, 25);
+
+	//predState currentState = HOVER;
+	for (int n = 0; n < numPoints_pred; n++) {
+		p = (Predator*)m_Predators.GetElem(FPREDATOR, n);
+
+
+
+		dirj = m_centroid - p->pos;
+		unNormDirj = dirj;
+		unNormDist = dirj.Length();
+		dirj.Normalize();
+		dirj *= p->orient.inverse();
+		dist = dirj.Length();
+		//printf("---------------Distance = %f\n", unNormDist);
+
+		if (p->currentState == HOVER) {
+			//printf("current state = HOVER\n");
+
+			// dirj = (dirj / dist) * p->orient.inverse();
+			yaw = atan2(dirj.z, dirj.x) * RADtoDEG;
+			pitch = asin(dirj.y) * RADtoDEG;
+			p->target.z -= yaw * m_Params.avoid_pred_angular_amt;
+			p->target.y -= pitch * m_Params.avoid_pred_angular_amt;
+
+			if (unNormDist > 20.0f) {
+				centroidReached = 2; // switch to attack
+				//printf("Distance reached, %f.\n", p->pos.y);
+			}
+
+		}
+		else if (p->currentState == ATTACK) {
+			//printf("current state = ATTACK\n");
+			yaw = atan2(dirj.z, dirj.x) * RADtoDEG;
+			pitch = asin(dirj.y) * RADtoDEG;
+			p->target.z += yaw * m_Params.border_amt;
+			p->target.y += pitch * m_Params.border_amt;
+
+			if (unNormDist < 2.0f) {
+				centroidReached = 1;	// switch to hover
+				//printf("Centroid reached.\n");
+			}
+			//else if (closest_bird < 0.1 * unNormDist) {
+				//centroidReached = 3;
+			//}
+		}
+		else if (p->currentState == FOLLOW) { // 3 : Follow
+			//printf("current state = FOLLOW\n");
+			Bird* b = (Bird*)m_Birds.GetElem(FBIRD, bird_index);
+			dirf = b->pos - p->pos;
+			distbird = dirf.Length();
+			dirf.Normalize();
+			dirf *= p->orient.inverse();
+
+			yaw = atan2(dirj.z, dirj.x) * RADtoDEG;
+			pitch = asin(dirj.y) * RADtoDEG;
+			p->target.z += yaw * m_Params.border_amt;
+			p->target.y += pitch * m_Params.border_amt;
+
+			//printf("Following bird\n");
+
+			if (distbird < 5.5f) {
+				//printf("caught bird.\n");
+				centroidReached = 1;
+			}
+			else if (unNormDist < 5.5f) { centroidReached = 1; }
+		}
+		transitionPredState(centroidReached, (p->currentState));
+
+	}
+	//--- Flight model
+	//
+	for (int n = 0; n < numPoints_pred; n++) {
+
+		p = (Predator*)m_Predators.GetElem(FPREDATOR, n);
+
+		// Body orientation
+		fwd = Vec3F(1, 0, 0) * p->orient;			// X-axis is body forward
+		up = Vec3F(0, 1, 0) * p->orient;			// Y-axis is body up
+		right = Vec3F(0, 0, 1) * p->orient;		// Z-axis is body right
+
+		// Direction of motion
+		p->speed = p->vel.Length();
+		vaxis = p->vel / p->speed;
+		if (p->speed < m_Params.min_predspeed) p->speed = m_Params.min_predspeed;				// birds dont go in reverse // set min speed to predminspeed
+		if (p->speed > m_Params.max_predspeed) p->speed = m_Params.max_predspeed;
+		if (p->speed == 0) vaxis = fwd;
+
+		p->orient.toEuler(angs);
+
+		// Target corrections
+		angs.z = fmod(angs.z, 180.0);
+		p->target.z = fmod(p->target.z, 180);										// yaw -180/180
+		p->target.x = circleDelta(p->target.z, angs.z) * 0.5;				// banking
+		p->target.y *= m_Params.pitch_decay;																				// level out
+		if (p->target.y < m_Params.pitch_min) p->target.y = m_Params.pitch_min;
+		if (p->target.y > m_Params.pitch_max) p->target.y = m_Params.pitch_max;
+		if (fabs(p->target.y) < 0.0001) p->target.y = 0;
+
+		// Compute angular acceleration
+		// - as difference between current direction and desired direction
+		p->ang_accel.x = (p->target.x - angs.x);
+		p->ang_accel.y = (p->target.y - angs.y);
+		p->ang_accel.z = circleDelta(p->target.z, angs.z);
+
+		// Roll - Control input
+		// - orient the body by roll
+		ctrlq.fromAngleAxis(p->ang_accel.x * m_Params.reaction_delay, fwd);
+		p->orient *= ctrlq;	p->orient.normalize();
+
+		// Pitch & Yaw - Control inputs
+		// - apply 'torque' by rotating the velocity vector based on pitch & yaw inputs				
+		ctrlq.fromAngleAxis(p->ang_accel.z * m_Params.reaction_delay, up * -1.f);
+		vaxis *= ctrlq; vaxis.Normalize();
+		ctrlq.fromAngleAxis(p->ang_accel.y * m_Params.reaction_delay, right);
+		vaxis *= ctrlq; vaxis.Normalize();
+
+		// Adjust velocity vector
+		p->vel = vaxis * p->speed;
+		force = 0;
+
+		// Dynamic pressure		
+		airflow = p->speed + m_Params.wind.Dot(fwd * -1.0f);		// airflow = air over wing due to speed + external wind			
+		dynamic_pressure = 0.5f * m_Params.air_density * airflow * airflow;
+
+		// Lift force
+		aoa = acos(fwd.Dot(vaxis)) * RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
+		if (isnan(aoa)) aoa = 1;
+		// CL = sin(aoa * 0.2) = coeff of lift, approximate CL curve with sin
+		L = sin(aoa * 0.2) * dynamic_pressure * m_Params.lift_factor * 0.5;		// lift equation. L = CL (1/2 p v^2) A
+		lift = up * L;
+		force += lift;
+
+		// Drag force	
+		drag = vaxis * dynamic_pressure * m_Params.drag_factor * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
+		force += drag;
+
+		// Thrust force
+		thrust = fwd * p->power;
+		force += thrust;
+
+		// Integrate position		
+		accel = force / m_Params.pred_mass;				// body forces	// changed mass from 0.1 to 0.8
+		accel += m_Params.gravity;						// gravity
+		accel += m_Params.wind * m_Params.air_density * m_Params.front_area;		// wind force. Fw = w^2 p * A, where w=wind speed, p=air density, A=frontal area
+
+		p->pos += p->vel * m_Params.DT;
+
+		// Boundaries
+		if (p->pos.x < m_Accel.bound_min.x) p->pos.x = m_Accel.bound_max.x;
+		if (p->pos.x > m_Accel.bound_max.x) p->pos.x = m_Accel.bound_min.x;
+		if (p->pos.z < m_Accel.bound_min.z) p->pos.z = m_Accel.bound_max.z;
+		if (p->pos.z > m_Accel.bound_max.z) p->pos.z = m_Accel.bound_min.z;
+
+		// Ground avoidance
+		L = p->pos.y - m_Accel.bound_min.y;
+		if (L < m_Params.bound_soften) {
+			L = (m_Params.bound_soften - L) / m_Params.bound_soften;
+			p->target.y += L * m_Params.avoid_ground_amt;
+			// power up so we have enough lift to avoid the ground
+			p->power = m_Params.avoid_ground_power;
+		}
+
+		// Ceiling avoidance
+		L = m_Accel.bound_max.y - p->pos.y;
+		if (L < m_Params.bound_soften) {
+			L = (m_Params.bound_soften - L) / m_Params.bound_soften;
+			p->target.y -= L * m_Params.avoid_ceil_amt;
+		}
+
+		// Ground condition
+		if (p->pos.y <= 0.00001) {
+			// Ground forces
+			p->pos.y = 0; p->vel.y = 0;
+			p->accel += Vec3F(0, 9.8, 0);	// ground force (upward)
+			p->vel *= 0.9999;				// ground friction
+			p->orient.fromDirectionAndRoll(Vec3F(fwd.x, 0, fwd.z), 0);	// zero pitch & roll			
+		}
+
+		// Integrate velocity
+		p->vel += accel * m_Params.DT;
+
+		vaxis = p->vel;	vaxis.Normalize();
+
+		// Update Orientation
+		// Directional stability: airplane will typically reorient toward the velocity vector
+		//  see: https://github.com/ramakarl/Flightsim
+		// this is an assumption yet much simpler/faster than integrating body orientation
+		// this way we dont need torque, angular vel, or rotational inertia.
+		// stalls are possible but not flat spins or 3D flying		
+		angvel.fromRotationFromTo(fwd, vaxis, m_Params.dynamic_stability);
+		if (!isnan(angvel.X)) {
+			p->orient *= angvel;
+			p->orient.normalize();
+		}
+	}
+}
+
 void Sample::SelectBird (float x, float y)
 {
 	// camera ray
@@ -1212,6 +1682,8 @@ void Sample::Run ()
 		DebugBird ( DEBUG_BIRD, "Start" );
 	#endif
 
+	bird_count = 0;
+
 	//--- Insert birds into acceleration grid
 	InsertIntoGrid ();
 
@@ -1222,7 +1694,8 @@ void Sample::Run ()
 	FindNeighbors ();
 
 	//--- Advance birds with behaviors & flight model
-	Advance ();			
+	Advance ();	
+	Advance_pred();
 
 	#ifdef DEBUG_BIRD
 		DebugBird ( 7, "Post-Advance" );
@@ -1236,6 +1709,12 @@ void Sample::Run ()
 	// PERF_POP();
 
 	m_time += m_Params.DT;
+	
+	runcount += 1;
+
+	outputFile << runcount << "," << m_time << "," << bird_count << "\n";
+	//outputFile << "Run: " << m_time << " msec/step\n";
+	//outputFile << "Bird count = " << bird_count << endl;
 }
 
 
@@ -1306,6 +1785,9 @@ void Sample::CameraToCockpit(int n )
 
 bool Sample::init ()
 {
+	outputFile.open("output_test.txt");
+	outputFile << "Run, Time, Bird count\n" << endl;
+
 	int w = getWidth(), h = getHeight();			// window width &f height
 
 	appSetVSync( false );
@@ -1336,9 +1818,9 @@ bool Sample::init ()
 
 	m_bird_sel = -1;
 	
-	addSearchPath ( ASSET_PATH );	
+	addSearchPath ( ASSET_PATH );	// <--- so fonts can be found
 
-	init2D ( "arial" );
+	init2D ( "arial" );		 // loads the arial.tga font file
 
 
 	InitGraphs ();
@@ -1356,9 +1838,10 @@ bool Sample::init ()
 	DefaultParams ();
 
 	
-	int num_birds = 2000;
+	int num_birds = 1000;
+	int num_pred = 1;
 
-	Reset ( num_birds );
+	Reset ( num_birds, num_pred );
 
 
 	// Camera
@@ -1394,6 +1877,7 @@ void Sample::display ()
 	int h = getHeight();
 
 	Bird* b;
+	Predator* p;
 
 	// Advance simulation
 	if (m_run) { 		
@@ -1421,11 +1905,11 @@ void Sample::display ()
 	}
 	clearGL();
 
-	start2D( w, h);
-		drawBackground ();
+	start2D( w, h);			// this 2D draw goes behind (before) the 3D stuff
+		drawBackground ();	// <-- this was changed to drawBackground. was SetBackground before.
 	end2D();
 
-	start3D(m_cam);		
+	start3D(m_cam);			// draws all 3D stuff
 
 		setLight3D ( Vec3F(0, 400, 0), Vec4F(0.1, 0.1, 0.1, 1) );	
 		setMaterial ( Vec3F(0,0,0), Vec3F(0,0,0), Vec3F(.2,.2,.2), 40, 1.0 );
@@ -1455,6 +1939,7 @@ void Sample::display ()
 			//drawLine3D ( Vec3F(0,0,0), Vec3F(100,0,0), Vec4F(1,0,0,1));
 			//drawLine3D ( Vec3F(0,0,0), Vec3F(  0,0,100), Vec4F(0,0,1,1));
 			//drawGrid( Vec4F(0.1,0.1,0.1, 1) );
+			drawCircle3D(m_centroid, 0.5, Vec4F(Vec4F(0.804, 0.961, 0.008, 1)));
 		}
 
 		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
@@ -1488,27 +1973,59 @@ void Sample::display ()
 			}
 		
 		}
+		// ***** Draw predator with circle around it, static
+		for (int n = 0; n < m_Predators.GetNumElem(FPREDATOR); n++) {
+			p = (Predator*)m_Predators.GetElem(FPREDATOR, n);
+
+			// drawLine3D ( p->pos, p->pos + (10*0.1f), Vec4F(0.804, 0.961, 0.008,1) );
+
+			if (m_draw_vis) {				// Black background
+				// visualize velocity
+				float v = (p->vel.Length() - m_Params.min_predspeed) / (m_Params.max_predspeed - m_Params.min_predspeed);
+				//float v2 = (b->power - 2) / 2.0;
+				float v2 = p->ang_accel.Length() / 24.0;
+
+				//printf("Predator is at: %f, %f, %f \n", p->pos.x, p->pos.y, p->pos.z);
+
+				Vec4F pclr = (p->currentState == ATTACK) ? Vec4F(1, 0, 0, 1) : Vec4F(0, 0, 1, 1);
+				drawLine3D(p->pos, p->pos + (p->vel * 0.1f), pclr);
+				drawCircle3D(p->pos, p->pos + (p->vel * 0.1f), 0.5, pclr);
+
+			}
+			else {						// Sky background
+				// bird dart
+				x = Vec3F(1, 0, 0) * p->orient;
+				y = Vec3F(0, 1, 0) * p->orient;
+				z = Vec3F(0, 0, 1) * p->orient;
+				Vec3F a, q, r, t;
+				a = p->pos - z * 0.3f;   // wingspan = 40 cm = 0.2m (per wing)
+				q = p->pos + z * 0.3f;
+				r = p->pos + x * 0.4f;   // length = 22 cm = 0.22m
+				t = y;
+				drawTri3D(a, q, r, t, Vec4F(0.950, 0.008, 0.960, 1));
+			}
+		}
 	end3D(); 
 
-	start2D ( w, h );
+	start2D ( w, h );			// this 2D draw is overlayed on top
 	
-		Vec4F tc (1,1,1,1);
-		sprintf ( msg, "t=%4.3f sec", m_time );
-		setTextSz ( 24, 0 );
-	  drawText ( Vec2F(10, 10), msg, tc );
+		Vec4F tc (1,1,1,1);		// text color to use (white)
+		sprintf ( msg, "t=%4.3f sec", m_time );		// any printf msg
+		setTextSz ( 24, 0 );						// set the text size
+		drawText ( Vec2F(10, 10), msg, tc );			// draw text at pixel location 10,10
 		
 		if ( m_bird_sel != -1) {
 			
 
 			Bird* bsel = (Bird*) m_Birds.GetElem ( FBIRD, m_bird_ndx );	// use index here
 			sprintf ( msg, "x: %f y: %f\n", getX(), getY() );
-			drawText ( Vec2F(10, 10), msg, tc );
-			sprintf ( msg, "pos: %f %f %f\n", bsel->pos.x, bsel->pos.y, bsel->pos.z );
 			drawText ( Vec2F(10, 30), msg, tc );
-			sprintf ( msg, "vel: %f %f %f = %f\n", bsel->vel.x, bsel->vel.y, bsel->vel.z, bsel->vel.Length() );
+			sprintf ( msg, "pos: %f %f %f\n", bsel->pos.x, bsel->pos.y, bsel->pos.z );
 			drawText ( Vec2F(10, 50), msg, tc );
-			sprintf ( msg, "power: %f\n", bsel->power );
+			sprintf ( msg, "vel: %f %f %f = %f\n", bsel->vel.x, bsel->vel.y, bsel->vel.z, bsel->vel.Length() );
 			drawText ( Vec2F(10, 70), msg, tc );
+			sprintf ( msg, "power: %f\n", bsel->power );
+			drawText ( Vec2F(10, 90), msg, tc );
 			
 		
 			// Graph selected bird 
@@ -1530,9 +2047,9 @@ void Sample::display ()
 
 	end2D(); 
 
-	drawAll ();
+	drawAll ();				// does actual render of everything
 	
-	appPostRedisplay();								// Post redisplay since simulation is continuous
+	appPostRedisplay();		// Post redisplay since simulation is continuous
 }
 
 
@@ -1616,7 +2133,7 @@ void Sample::keyboard(int keycode, AppEnum action, int mods, int x, int y)
 		m_cockpit_view = !m_cockpit_view; 
 		//m_cam_orient = 
 		break;
-	case 'r': Reset( m_Params.num_birds ); break;
+	case 'r': Reset( m_Params.num_birds, m_Params.num_predators); break;
 	case ' ':	m_run = !m_run;	break;	
 	case 'z': 
 		m_bird_sel--; 
@@ -1643,12 +2160,13 @@ void Sample::reshape (int w, int h)
 
 void Sample::startup ()
 {
-	int w = 1900, h = 1000;
+	int w = 1200, h = 750;
 	appStart ( "Flock v2 (c) Rama Karl 2023, MIT license", "Flock v2", w, h, 4, 2, 16, false );	
 }
 
 void Sample::shutdown()
 {
+	outputFile.close();
 }
 
 
