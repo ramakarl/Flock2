@@ -336,20 +336,10 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 
   float3 centroid = make_float3(0,50,0);
 
-	// Turn isolated birds toward flock centroid
-	float d = b->r_nbrs / FParams.border_cnt;
-	if ( d < 1.0 ) { 
-		b->clr = make_float4(1, .5, 0, 1);	
-		dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
-		yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
-		pitch = asin( dirj.y )*RADtoDEG;
-		b->target.z +=   yaw * FParams.border_amt;
-		b->target.y += pitch * FParams.border_amt;		
-	}
-
 	if ( b->r_nbrs > 0 ) {
 
 		// Rule 1. Avoidance
+		// (Reynolds rule)
 		//
 		// 1a. Side neighbor avoidance
 		if ( b->near_j != -1 ) {
@@ -380,6 +370,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 
 
 		// Rule 2. Alignment
+		// (Reynolds rule)
 		//
 		dirj = quat_mult ( normalize( b->ave_vel ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
@@ -388,13 +379,28 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 		b->target.y += pitch * FParams.align_amt;
 
 		// Rule 3. Cohesion
+		// (Reynolds rule)
+		//
 		dirj = quat_mult ( normalize( b->ave_pos - b->pos ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
 		pitch = asin( dirj.y ) * RADtoDEG;
 		b->target.z += yaw   * FParams.cohesion_amt;
 		b->target.y += pitch * FParams.cohesion_amt; 		
 
-		// Rule 4. Predators
+		// Rule 4. Boundary Term
+		// (Hoetzlein, new boundary term for periphery avoidance, 2023)	
+		float d = b->r_nbrs / FParams.border_cnt;
+		if ( d < 1.0 ) { 
+			b->clr = make_float4(1, .5, 0, 1);	
+			dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
+			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
+			pitch = asin( dirj.y )*RADtoDEG;
+			b->target.z +=   yaw * FParams.border_amt;
+			b->target.y += pitch * FParams.border_amt;		
+		}
+
+		// Rule 5. Bird-Predators avoidance
+		// (from Noortje Hagelaars, based on CPU version, 2024)
 		Predator* p;
 		for (int m = 0; m < FParams.num_predators; m++) {
 

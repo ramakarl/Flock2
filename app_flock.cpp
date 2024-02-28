@@ -1047,8 +1047,11 @@ void Sample::ComputeCentroid ()
 void Sample::UpdateFlockData ()
 {	
 	#ifdef BUILD_CUDA
-		// transfer flock data to GPU
+		// transfer flock data to GPU, eg. centroid
 		cuCheck ( cuMemcpyHtoD ( m_cuFlock, &m_Flock, sizeof(Flock) ),	"Flock", "cuMemcpyHtoD", "cuFlock", DEBUG_CUDA );
+
+		// transfer predators to GPU
+		m_Predators.CommitAll ();
 	#endif
 }
 
@@ -1061,9 +1064,9 @@ void Sample::WritePointCloud ( int frame )
 	// write flock data as PLY point cloud	
 	//
 	// how to read and plot with MATLAB:
-	//   i = 1
-	//   x = pcread ( "birds"+num2str(i,'%04d')+".ply")
-	//   pcshow ( x.Location, x.Normal)  
+	//   frame = 1
+	//   pts = pcread ( "birds"+num2str(frame,'%04d')+".ply")
+	//   pcshow ( pts.Location, pts.Normal)  
 	//
 
 	// only record certain frames..
@@ -1072,9 +1075,9 @@ void Sample::WritePointCloud ( int frame )
 	if ( frame > m_rec_start && (frame % m_rec_step)==0 ) {
 		
 		// make file numbers continuous
-		int fileid = (frame - m_rec_start)/m_rec_step;
+		int file_num = (frame - m_rec_start)/m_rec_step;
 
-		sprintf ( fn, "birds%04d.ply", fileid );		
+		sprintf ( fn, "birds%04d.ply", file_num );
 		fp = fopen ( fn, "wt" );
 		if (fp==0) return;
 		fprintf ( fp, "ply\n" );
@@ -1790,8 +1793,7 @@ void Sample::Run ()
 	Advance ();	
 
 	//--- Advance predators
-	Advance_pred();
-	m_Predators.CommitAll ();
+	Advance_pred();	
 
 	//--- Update centroid
 	ComputeCentroid ();	
