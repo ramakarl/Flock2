@@ -55,7 +55,10 @@ _REQUIRE_GL()
 
 _REQUIRE_GLEW()
 
-_REQUIRE_CUDA( FALSE, "." )
+OPTION ( BUILD_CUDA "Build CUDA for GPU." false )
+if (BUILD_CUDA)
+  _REQUIRE_CUDA( TRUE, "." )
+endif()
 
 #--- symbols in release mode
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi" CACHE STRING "" FORCE)

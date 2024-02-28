@@ -17,11 +17,15 @@
 
 #include "datax.h"
 
-__constant__ Accel		FAccel;
 __constant__ Params		FParams;
-__constant__ cuDataX	FBirds;
+__constant__ Flock		FFlock;
+
+__constant__ cuDataX	FBirds;				// birds
 __constant__ cuDataX	FBirdsTmp;
+__constant__ Accel		FAccel;
 __constant__ cuDataX	FGrid;
+
+__constant__ cuDataX	FPredators;		// predators
 
 #define SCAN_BLOCKSIZE		512
 
@@ -389,6 +393,27 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 		pitch = asin( dirj.y ) * RADtoDEG;
 		b->target.z += yaw   * FParams.cohesion_amt;
 		b->target.y += pitch * FParams.cohesion_amt; 		
+
+		// Rule 4. Predators
+		Predator* p;
+		for (int m = 0; m < FParams.num_predators; m++) {
+
+			p = (Predator*) FPredators.data(FPREDATOR) + m;			
+			float3 predatorDir = p->pos - b->pos;
+			float predatorDist = length ( predatorDir );
+
+			if (predatorDist < FParams.pred_radius) {
+				// Flee from predator							
+				predatorDir = quat_mult ( normalize ( predatorDir ), ctrlq );
+				yaw = atan2(predatorDir.z, predatorDir.x) * RADtoDEG;
+				pitch = asin(predatorDir.y) * RADtoDEG;
+				predatorDist = fmax(1.0f, fmin(predatorDist * predatorDist, 100.0f));
+				b->target.z -= yaw * FParams.avoid_pred_angular_amt; // / predatorDist;
+				b->target.y -= pitch * FParams.avoid_pred_angular_amt; // / predatorDist;
+				b->clr = make_float4(1, 0, 1, 1);				
+			}
+		}
+		
 		 
 	}	
 

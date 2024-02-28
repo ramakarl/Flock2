@@ -6,9 +6,11 @@
 	#define FBIRD		0		
 	#define FGCELL		1
 	#define FGNDX		2	
-#define FPREDATOR		3	// ***
-#define FGCELL_pred     4	// ***
-#define FGNDX_pred      6	// ***
+	#define FPREDATOR		3	// ***
+	#define FGCELL_pred     4	// ***
+	#define FGNDX_pred      6	// ***
+
+	#define MAX_FLOCKS		50
 
 	// Acceleration grid data
 	#define AGRID			0	
@@ -68,6 +70,16 @@
 		
 		float		speed, pitch_adv, power;	
 		int			id, near_j, t_nbrs, r_nbrs;
+	};
+
+	// entire flock states
+
+	struct ALIGN(128) Flock {
+		
+		f3			centroid;
+
+		int			num_flocks;
+		f3			flock_centers[ MAX_FLOCKS ];
 	};
 
 	enum predState {
