@@ -87,6 +87,7 @@ public:
 	void			Advance ();	
 	void			ComputeCentroid ();
 	void			UpdateFlockData ();
+	void			WritePointCloud (int frame);
 	
 	// predators
 	Predator*	AddPredator(Vec3F pos, Vec3F vel, Vec3F target, float power);		//predators
@@ -126,6 +127,8 @@ public:
 	Vec3F			m_predcentroid;	//-------
 
 	float			m_time;
+	int				m_frame;
+	int				m_rec_start, m_rec_step;
 	bool			m_run;
 	int				m_cam_mode;
 	bool			m_cam_adjust;
@@ -307,7 +310,7 @@ void Sample::DefaultParams ()
 	m_Params.avoid_ceil_amt = 0.1f;				// ceiling avoid strength
 
 	// predator
-	m_Params.pred_radius = 15.0;						// detection radius of predator for birds
+	m_Params.pred_radius = 10.0;						// detection radius of predator for birds
 	//m_Params.pred_flee_speed = m_Params.max_speed;	// bird speed to get away from predator
 
 	m_Params.avoid_pred_angular_amt = 0.04f;			// bird angular avoidance amount w.r.t. predator
@@ -1031,11 +1034,10 @@ void Sample::ComputeCentroid ()
 	Vec3F centroid;	
 
 	// compute centroid of birds
-	Bird* bi;
-	Vec3F pos;
+	Bird* b;	
 	for (int i=0; i < m_Params.num_birds; i++) {
-		bi = (Bird*) m_Birds.GetElem( FBIRD, i);		
-		centroid += bi->pos;
+		b = (Bird*) m_Birds.GetElem( FBIRD, i);		
+		centroid += b->pos;
 	}
 	centroid *= (1.0f / m_Params.num_birds);
 		
@@ -1048,8 +1050,54 @@ void Sample::UpdateFlockData ()
 		// transfer flock data to GPU
 		cuCheck ( cuMemcpyHtoD ( m_cuFlock, &m_Flock, sizeof(Flock) ),	"Flock", "cuMemcpyHtoD", "cuFlock", DEBUG_CUDA );
 	#endif
+}
+
+void Sample::WritePointCloud ( int frame )
+{
+	Bird* b;	
+	FILE* fp;
+	char fn[512];
+
+	// write flock data as PLY point cloud	
+	//
+	// how to read and plot with MATLAB:
+	//   i = 1
+	//   x = pcread ( "birds"+num2str(i,'%04d')+".ply")
+	//   pcshow ( x.Location, x.Normal)  
+	//
+
+	// only record certain frames..
+	// - m_rec_start, skip until flocking settles
+	// - m_rec_step, skip every n-th frame
+	if ( frame > m_rec_start && (frame % m_rec_step)==0 ) {
+		
+		// make file numbers continuous
+		int fileid = (frame - m_rec_start)/m_rec_step;
+
+		sprintf ( fn, "birds%04d.ply", fileid );		
+		fp = fopen ( fn, "wt" );
+		if (fp==0) return;
+		fprintf ( fp, "ply\n" );
+		fprintf ( fp, "format ascii 1.0\n" );
+		fprintf ( fp, "element vertex %d\n", m_Params.num_birds );
+		fprintf ( fp, "property float x\n" );
+		fprintf ( fp, "property float y\n" );
+		fprintf ( fp, "property float z\n" );		
+		fprintf ( fp, "property float nx\n" );
+		fprintf ( fp, "property float ny\n" );
+		fprintf ( fp, "property float nz\n" );		
+		fprintf ( fp, "end_header\n" );
+		// xyz (position) is the bird position
+		// nx,ny,nz (normal) is saved as the bird angular acceleration (but could store other bird variables)
+		for (int i=0; i < m_Params.num_birds; i++) {
+			b = (Bird*) m_Birds.GetElem( FBIRD, i);				
+			fprintf ( fp, "%4.3f %4.3f %4.3f %4.3f %4.3f %4.3f\n", b->pos.x, b->pos.y, b->pos.z, b->ang_accel.x, b->ang_accel.y, b->ang_accel.z );
+		}
+		fclose ( fp );
+	}
 
 }
+
 
 
 void Sample::Advance ()
@@ -1749,6 +1797,9 @@ void Sample::Run ()
 	ComputeCentroid ();	
 	UpdateFlockData ();
 
+	//--- Write point cloud
+	WritePointCloud ( m_frame );
+
 	#ifdef DEBUG_BIRD
 		DebugBird ( 7, "Post-Advance" );
 	#endif
@@ -1761,6 +1812,7 @@ void Sample::Run ()
 	// PERF_POP();
 
 	m_time += m_Params.DT;
+	m_frame++;
 	
 	runcount += 1;
 
@@ -1846,7 +1898,11 @@ bool Sample::init ()
 	m_draw_vis = true;
 	m_cam_mode = 0;
 	m_time = 0;
+	m_frame = 0;
 	m_rnd.seed (12);
+
+	m_rec_start = 1000;
+	m_rec_step = 10;
 	
 	// enable GPU if cuda available
 	#ifdef BUILD_CUDA
