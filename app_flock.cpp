@@ -1092,9 +1092,10 @@ void Sample::WritePointCloud ( int frame )
 		fprintf ( fp, "end_header\n" );
 		// xyz (position) is the bird position
 		// nx,ny,nz (normal) is saved as the bird angular acceleration (but could store other bird variables)
+		// note: Y+ is up in simulation, exported with Z+ up
 		for (int i=0; i < m_Params.num_birds; i++) {
 			b = (Bird*) m_Birds.GetElem( FBIRD, i);				
-			fprintf ( fp, "%4.3f %4.3f %4.3f %4.3f %4.3f %4.3f\n", b->pos.x, b->pos.y, b->pos.z, b->ang_accel.x, b->ang_accel.y, b->ang_accel.z );
+			fprintf ( fp, "%4.3f %4.3f %4.3f %4.3f %4.3f %4.3f\n", b->pos.x, b->pos.z, b->pos.y, b->ang_accel.x, b->ang_accel.z, b->ang_accel.y );
 		}
 		fclose ( fp );
 	}
@@ -1941,7 +1942,7 @@ bool Sample::init ()
 	DefaultParams ();
 
 	
-	int num_birds = 10000;
+	int num_birds = 20000;
 	int num_pred = 1;
 
 	Reset ( num_birds, num_pred );
