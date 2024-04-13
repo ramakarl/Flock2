@@ -5,6 +5,8 @@
 
 #define CUDA_KERNEL
 
+// #define DEBUG_BIRD			7					// enable for GPU printfs
+
 #include "flock_kernels.cuh"
 
 #include "quaternion.cuh"
@@ -304,7 +306,7 @@ inline __device__ __host__ float circleDelta(float b, float a)
 }
 
 
-extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int numPnts )
+extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss, int numPnts )
 {		
 	uint i = __mul24(blockIdx.x, blockDim.x) + threadIdx.x;	// particle index				
 	if ( i >= numPnts ) return;
@@ -338,8 +340,8 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 
 	if ( b->r_nbrs > 0 ) {
 
-		// Rule 1. Avoidance
-		// (Reynolds rule)
+		// Rule 1. Avoidance		
+		// (Hoetzlein, orientation-based avoidance, derived from Reynolds pos-based)
 		//
 		// 1a. Side neighbor avoidance
 		if ( b->near_j != -1 ) {
@@ -370,7 +372,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 
 
 		// Rule 2. Alignment
-		// (Reynolds rule)
+		// (Hoetzlein, orientation-based alignment, derived from Reynolds pos-based)
 		//
 		dirj = quat_mult ( normalize( b->ave_vel ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
@@ -379,7 +381,7 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 		b->target.y += pitch * FParams.align_amt;
 
 		// Rule 3. Cohesion
-		// (Reynolds rule)
+		// (Hoetzlein, orientation-based cohesion, derived from Reynolds pos-based)
 		//
 		dirj = quat_mult ( normalize( b->ave_pos - b->pos ), ctrlq );
 		yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
@@ -419,9 +421,9 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 				b->clr = make_float4(1, 0, 1, 1);				
 			}
 		}
-		
 		 
 	}	
+
 
 	//-------------- FLIGHT MODEL
 
@@ -469,6 +471,13 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 	// Adjust velocity vector
 	b->vel = vaxis * b->speed;
 	force = make_float3(0,0,0);	
+
+	// Compute off-axis angle from neighborhood average	
+	f3 v0, v1;
+	v0 = normalize ( b->vel );
+	v1 = normalize ( b->ave_vel );
+	ctrlq = quat_rotation_fromto ( v0, v1, 1.0 );	
+	b->ang_offaxis = quat_to_euler ( ctrlq ) ;
 
 	// Dynamic pressure		
 	airflow = b->speed + dot ( FParams.wind, fwd*-1.0f );		// airflow = air over wing due to speed + external wind	
@@ -542,6 +551,94 @@ extern "C" __global__ void advanceBirds ( float time, float dt, float ss, int nu
 			printf (" orients: %f, %f, %f, %f\n", b->orient.x, b->orient.y, b->orient.z, b->orient.w );		
 			printf (" angs:    %f, %f, %f\n", angs.x, angs.y, angs.z );		
 			printf (" target:  %f, %f, %f\n", b->target.x, b->target.y, b->target.z );		
+		}
+	#endif
+}
+
+extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, int numPnts )
+{		
+	uint i = __mul24(blockIdx.x, blockDim.x) + threadIdx.x;	// particle index				
+	if ( i >= numPnts ) return;
+
+	// Reynold's classic vector-based Boids
+	//
+
+	// Get current bird
+	Bird* b = ((Bird*) FBirds.data(FBIRD)) + i;
+	Bird* bj;
+	float3 dirj, force, accel, angs, v0, v1;
+	quat4 q;
+
+	force = make_float3(0,0,0);
+	b->clr = make_float4(0,0,0,0);			// default, visualize ang accel (w=0)
+	
+	if ( b->r_nbrs > 0 ) {
+
+		// Rule #1. Avoidance	(Reynolds position-based)		
+		if ( b->near_j != -1 ) {		
+			bj = ((Bird*) FBirds.data(FBIRD)) + b->near_j;
+			dirj = bj->pos - b->pos;
+			force -= dirj * FParams.reynolds_avoidance;
+		}
+	
+		// Rule #2. Alignment	(Reynolds position-based)			
+		dirj = b->ave_vel - b->vel;
+		force += dirj * FParams.reynolds_alignment;
+
+		// Rule #3. Cohesion (Reynolds position-based)			
+		dirj = b->ave_pos - b->pos;
+		force += dirj * FParams.reynolds_cohesion;
+	}
+
+	// Ground avoidance (Y-)
+	float L = b->pos.y - FAccel.bound_min.y;
+	if ( L < FParams.bound_soften ) {			
+		L = (FParams.bound_soften - L) / FParams.bound_soften;
+		force.y += L * L * FParams.avoid_ground_amt * 10;			
+	} 
+
+	// Ceiling avoidance (Y+)
+	L = FAccel.bound_max.y - b->pos.y;
+	if ( L < FParams.bound_soften ) {	
+		L = (FParams.bound_soften - L) / FParams.bound_soften;
+		force.y -= L * L * FParams.avoid_ceil_amt * 10; 						
+	} 
+	
+	// Integrate position	& velocity
+	accel = force / FParams.mass;						// body forces	
+	v0 = normalize ( b->vel );
+	b->vel += accel * dt;
+	b->pos += b->vel * dt;
+
+	// Compute angular acceleration (comparison only, does not affect Reynold's sim)	
+	// b->orient = quat_from_directionup ( v0, make_float3(0,1,0) );
+	v1 = normalize ( b->vel );
+	q = quat_rotation_fromto ( v0, v1, 1.0 );	
+	b->ang_accel = quat_to_euler ( q );
+
+	// Compute angle from neighborhood average	
+	v1 = normalize ( b->ave_vel );
+	q = quat_rotation_fromto ( v0, v1, 1.0 );	
+	b->ang_offaxis = quat_to_euler ( q ) ;
+
+	// Speed limit
+	b->speed = length( b->vel );	
+	if ( b->speed < FParams.min_speed) b->speed = FParams.min_speed;
+	if ( b->speed > FParams.max_speed) b->speed = FParams.max_speed;
+	b->vel = b->vel * b->speed / length(b->vel);
+
+	// Wrap boundaries (X/Z)
+	if ( b->pos.x < FAccel.bound_min.x ) b->pos.x = FAccel.bound_max.x;
+	if ( b->pos.x > FAccel.bound_max.x ) b->pos.x = FAccel.bound_min.x;
+	if ( b->pos.z < FAccel.bound_min.z ) b->pos.z = FAccel.bound_max.z;
+	if ( b->pos.z > FAccel.bound_max.z ) b->pos.z = FAccel.bound_min.z;	
+
+	#ifdef DEBUG_BIRD
+		if (b->id == DEBUG_BIRD) {
+			float aa = length ( b->ang_accel );
+			printf ("---- ADVANCE END (GPU), id %d, #%d\n", b->id, i );			
+			printf (" force:     %f, %f, %f\n", force.x, force.y, force.z);
+			printf (" ang_accel: %f\n", aa );
 		}
 	#endif
 }

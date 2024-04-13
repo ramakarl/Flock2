@@ -51,6 +51,8 @@ set( USE_NVTX true CACHE BOOL "")
 
 _REQUIRE_MAIN()
 
+_REQUIRE_LIBEXT()       # for FFTW
+
 _REQUIRE_GL()
 
 _REQUIRE_GLEW()
@@ -63,6 +65,22 @@ endif()
 #--- symbols in release mode
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi" CACHE STRING "" FORCE)
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF" CACHE STRING "" FORCE)
+
+#####################################################################################
+# FFTW
+#
+find_package(FFTW)
+
+if (FFTW_FOUND)    
+  add_definitions(-DUSE_FFTW)    
+  list ( APPEND LIBRARIES_OPTIMIZED "${LIBEXT_REPO}/win64/libfftw3-3.lib" )
+  list ( APPEND LIBRARIES_DEBUG "${LIBEXT_REPO}/win64/libfftw3-3.lib" )  
+  include_directories( "${LIBEXT_REPO}/include" )  
+  _EXPANDLIST( OUTPUT PACKAGE_DLLS SOURCE ${FFTW_LIB_DIR} FILES ${FFTW_DLL} )
+  message ( STATUS "  ---> Using FFTW 3.3")  
+endif()
+
+
 
 #####################################################################################
 # Asset Path

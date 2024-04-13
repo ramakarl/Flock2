@@ -27,13 +27,14 @@
 	#define SCAN_BLOCKSIZE		512		
 
 	// GPU Kernels
-	#define KERNEL_INSERT				0
+	#define KERNEL_INSERT						0
 	#define	KERNEL_COUNTING_SORT		1
-	#define KERNEL_FIND_NBRS			2
-	#define KERNEL_ADVANCE				3
-	#define KERNEL_FPREFIXSUM			4
-	#define KERNEL_FPREFIXFIXUP			5
-	#define KERNEL_MAX					8
+	#define KERNEL_FIND_NBRS				2
+	#define KERNEL_ADVANCE_ORIENT		3
+	#define KERNEL_ADVANCE_VECTORS	4
+	#define KERNEL_FPREFIXSUM				5
+	#define KERNEL_FPREFIXFIXUP			6
+	#define KERNEL_MAX							7	
 
 	#ifdef CUDA_KERNEL
 		#include "quaternion.cuh"
@@ -66,7 +67,8 @@
 		f4			clr;
 
 		f3			pos, vel, accel, target;
-		f3			ave_pos, ave_vel, ang_accel;
+		f3			ave_pos, ave_vel;
+		f3			ang_accel, ang_offaxis;
 		
 		float		speed, pitch_adv, power;	
 		int			id, near_j, t_nbrs, r_nbrs;
@@ -155,15 +157,19 @@
 		f3			gravity;
 		f3			wind;
 
-		float 		fov_pred, fovcos_pred;
+		float 	fov_pred, fovcos_pred;
 
-		float 		pred_radius;		//----------
-		float 		pred_flee_speed;	//----------
-		float 		avoid_pred_angular_amt;
-		float 		avoid_pred_power_amt;
-		float 		avoid_pred_power_ctr;
+		float 	pred_radius;					//----------
+		float 	pred_flee_speed;			//----------
+		float 	avoid_pred_angular_amt;
+		float 	avoid_pred_power_amt;
+		float 	avoid_pred_power_ctr;
 		float		max_predspeed, min_predspeed;
 		float		pred_mass;
+
+		float		reynolds_avoidance;
+		float		reynolds_cohesion;
+		float		reynolds_alignment;
 	};
 
 #endif
