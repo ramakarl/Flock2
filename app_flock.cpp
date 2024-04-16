@@ -67,7 +67,8 @@ struct graph_t {
 #define GRAPH_ACCEL		3
 #define GRAPH_MAX			4
 
-#define NUM_BIRDS		12000
+#define NUM_BIRDS		5000
+
 #define SAMPLES			16384
 #define PLOT_RESX		2048
 #define PLOT_RESY		1024
@@ -99,8 +100,7 @@ public:
 	void			Run ();
 	void			FindNeighbors ();	
 	void			AdvanceByOrientation ();	
-	void			AdvanceByVectors  ();
-	void			ComputeCentroid ();
+	void			AdvanceByVectors  ();	
 	void			UpdateFlockData ();
 	void			OutputPlot ( int what, int frame );
 	void			OutputPointCloudFiles (int frame);
@@ -113,7 +113,7 @@ public:
 	
 	// rendering
 	void			SelectBird (float x, float y);
-	void			InitGraphs ();
+	void			Graph ( int id, float y, Vec4F clr );
 	void			VisualizeSelectedBird ();	
 	void			DebugBird ( int id, std::string msg );
 	void			CameraToBird ( int b );
@@ -242,7 +242,7 @@ Bird* Sample::AddBird ( Vec3F pos, Vec3F vel, Vec3F target, float power )
 	b.id = ndx;
 	b.pos = pos;
 	b.vel = vel;		
-	b.target = target;	
+	b.target = target;		
 	b.power = power;
 	b.pitch_adv = 0;
 	b.accel.Set(0,0,0);
@@ -302,39 +302,37 @@ void Sample::DefaultParams ()
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
 	m_Params.steps = 2;
-	m_Params.DT = 0.005;						// timestep (sec), .005 = 200 hz
-	m_Params.mass =	0.1;						// bird mass (kg)
-	m_Params.pred_mass = 0.8;
-	m_Params.min_speed = 7.2;						// min speed (m/s)		// Demsar2014
-	m_Params.max_speed = 18;					// max speed (m/s)		// Demsar2014
-	m_Params.max_predspeed = 22;										//(m/s)-------Demsar2014
-	m_Params.min_predspeed = 8.8;										//(m/s)-------Demsar2014
+	m_Params.DT = 0.005;							// timestep (sec), .005 = 5 msec = 200 hz
+	m_Params.mass =	0.1;							// bird mass (kg)
+	m_Params.power = 0.3;							// 100% power (in joules)
+	m_Params.min_speed = 7.2;					// min speed (m/s)		// Demsar2014
+	m_Params.max_speed = 18;					// max speed (m/s)		// Demsar2014	
+	//m_Params.min_speed = 1.0;					// min speed (m/s)		// Demsar2014
+	//m_Params.max_speed = 4.0;					// max speed (m/s)		// Demsar2014	
 	m_Params.min_power = -20;					// min power (N)
 	m_Params.max_power = 20;					// max power (N)
-	m_Params.wind =	Vec3F(0,0,0);				// wind direction & strength
-	m_Params.fov = 130;							// bird field-of-view (degrees)
+	m_Params.wind =	Vec3F(0,0,0);			// wind direction & strength
+	m_Params.fov = 130;								// bird field-of-view (degrees)
 	m_Params.fovcos = cos ( m_Params.fov * DEGtoRAD );
-
-	m_Params.lift_factor = 0.100;				// lift factor
-	m_Params.drag_factor = 0.002;				// drag factor
-	m_Params.safe_radius = 2.0;					// radius of avoidance (m)
-	m_Params.border_cnt = 30;					// border width (# birds)
-	m_Params.border_amt = 0.08f;				// border steering amount (keep <0.1)
 	
-	m_Params.avoid_angular_amt= 0.02f;			// bird angular avoidance amount
-	m_Params.avoid_power_amt =	0.02f;			// power avoidance amount (N)
-	m_Params.avoid_power_ctr =	3;				// power avoidance center (N)
-	
+	// social factors
+	m_Params.border_cnt = 30;						// border width (# birds)	
+	m_Params.border_amt = 0.05f;				// border steering amount (keep <0.1)	
+	//m_Params.border_amt = 0.0f;
+	m_Params.avoid_angular_amt= 0.02f;	// bird angular avoidance amount
+	m_Params.avoid_power_amt =	0.02f;	// power avoidance amount (N)
+	m_Params.avoid_power_ctr =	3;			// power avoidance center (N)	
 	m_Params.align_amt = 1.000f;				// bird alignment amount
-
 	m_Params.cohesion_amt =	0.001f;			// bird cohesion amount
 
-	m_Params.pitch_decay = 0.999;				// pitch decay (return to level flight)
-	m_Params.pitch_min = -40;					// min pitch (degrees)
-	m_Params.pitch_max = 40;					// max pitch (degrees)
-	
-	m_Params.reaction_delay = 0.0020f;			// reaction delay
-
+	// flight parameters
+	m_Params.lift_factor = 0.0500;			// lift factor
+	m_Params.drag_factor = 0.0060;			// drag factor (L/D ratio 10:1)
+	m_Params.safe_radius = 2.0;					// radius of avoidance (m)
+	m_Params.pitch_decay = 0.95;				// pitch decay (return to level flight)
+	m_Params.pitch_min = -40;						// min pitch (degrees)
+	m_Params.pitch_max = 40;						// max pitch (degrees)	
+	m_Params.reaction_delay = 0.0003f;			// reaction delay
 	m_Params.dynamic_stability = 0.6f;			// dyanmic stability factor
 	m_Params.air_density = 1.225;				// air density (kg/m^3)
 	m_Params.gravity = Vec3F(0, -9.8, 0);		// gravity (m/s^2)
@@ -344,10 +342,12 @@ void Sample::DefaultParams ()
 	m_Params.avoid_ground_amt = 0.5f;			// ground avoid strength
 	m_Params.avoid_ceil_amt = 0.1f;				// ceiling avoid strength
 
-	// predator
-	m_Params.pred_radius = 10.0;						// detection radius of predator for birds
+	// Predator
+	m_Params.pred_radius = 10.0;					// detection radius of predator for birds
+	m_Params.pred_mass = 0.8;	
+	m_Params.max_predspeed = 22;				// m/s
+	m_Params.min_predspeed = 8.8;				// m/s	
 	//m_Params.pred_flee_speed = m_Params.max_speed;	// bird speed to get away from predator
-
 	m_Params.avoid_pred_angular_amt = 0.04f;			// bird angular avoidance amount w.r.t. predator
 	m_Params.avoid_pred_power_amt = 0.04f;				// power avoidance amount (N) w.r.t. predator
 	m_Params.avoid_pred_power_ctr = 3;					// power avoidance center (N) w.r.t. predator
@@ -355,15 +355,16 @@ void Sample::DefaultParams ()
 	m_Params.fov_pred = 120; // degrees
 	m_Params.fovcos_pred = cos(m_Params.fov_pred * DEGtoRAD);
 
-	// Reynold's Classic model
-	
-	/*m_Params.reynolds_avoidance = 0.05;
-	m_Params.reynolds_cohesion = 0.01;
-	m_Params.reynolds_alignment = 0.5;*/
+	// testing level flight	- no social factors, only balanced flight
+	/* m_Params.align_amt = 0.0f;	
+	m_Params.cohesion_amt =	0.0f;
+	m_Params.avoid_angular_amt = 0.0f;
+	m_Params.border_amt = 0.0f;  */
 
-	m_Params.reynolds_avoidance = 0.20;
-	m_Params.reynolds_cohesion = 0.05;
-	m_Params.reynolds_alignment = 0.5;
+	// Reynold's Classic model	
+	m_Params.reynolds_avoidance = 0.15;
+	m_Params.reynolds_cohesion =  0.09;
+	m_Params.reynolds_alignment = 0.50;
 	
 }
 
@@ -418,9 +419,11 @@ void Sample::Reset (int num, int num_pred )
 		// randomly distribute birds
 		pos = m_rnd.randV3( -100, 100 );
 		pos.y = pos.y * .5f + 50;
-		vel = m_rnd.randV3( -20, 20 );
+		vel = m_rnd.randV3( -20, 20 );		
+		vel.y = 0;
+		vel *= 7.5 / vel.Length ();
 		h = m_rnd.randF(-180, 180);
-		b = AddBird ( pos, vel, Vec3F(0, 0, h), 3);  
+		b = AddBird ( pos, vel, Vec3F(0, 0, h), 1 );  
 		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f ); 	
 
 	}
@@ -1021,23 +1024,28 @@ void Sample::DebugBird ( int id, std::string msg )
 	}
 }
 
-void Sample::ComputeCentroid ()
-{
-	Vec3F centroid;	
+void Sample::UpdateFlockData ()
+{	
+	Vec3F centroid (0,0,0);	
+	float speed = 0;
+	float energy = 0;
 
-	// compute centroid of birds
+	// compute centroid & energy of birds
 	Bird* b;	
 	for (int i=0; i < m_Params.num_birds; i++) {
 		b = (Bird*) m_Birds.GetElem( FBIRD, i);		
 		centroid += b->pos;
+		speed += b->speed;
+		energy += (b->energy > 0) ? b->energy : 0;
 	}
 	centroid *= (1.0f / m_Params.num_birds);
 		
 	m_Flock.centroid = centroid;
-}
+	m_Flock.speed = speed / m_Params.num_birds;
+	m_Flock.energy = energy / m_Params.num_birds;
 
-void Sample::UpdateFlockData ()
-{	
+	Graph ( 0, m_Flock.energy * 10000.0, Vec4F(1,0,0,1) );
+
 	if ( m_gpu ) {
 		#ifdef BUILD_CUDA
 			// transfer flock data to GPU, eg. centroid
@@ -1491,7 +1499,9 @@ void Sample::AdvanceByOrientation ()
 			// Direction of motion
 			b->speed = b->vel.Length();
 			vaxis = b->vel / b->speed;	
-			if ( b->speed < m_Params.min_speed ) b->speed = m_Params.min_speed;				// birds dont go in reverse
+			if ( b->speed < m_Params.min_speed ) {
+				b->speed = m_Params.min_speed;				// birds dont go in reverse
+			}
 			if ( b->speed > m_Params.max_speed ) b->speed = m_Params.max_speed;
 			if ( b->speed==0) vaxis = fwd;
 			
@@ -1536,9 +1546,9 @@ void Sample::AdvanceByOrientation ()
 			aoa = acos( fwd.Dot( vaxis ) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  			if (isnan(aoa)) aoa = 1;
 			// CL = sin(aoa * 0.2) = coeff of lift, approximate CL curve with sin
-			L = sin( aoa * 0.2) * dynamic_pressure * m_Params.lift_factor * 0.5;		// lift equation. L = CL (1/2 p v^2) A
+			L = sin( aoa * 0.2) * dynamic_pressure * m_Params.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
 			lift = up * L;
-			force += lift;	
+			force += lift;
 
 			// Drag force	
 			drag = vaxis * dynamic_pressure * m_Params.drag_factor  * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
@@ -1957,20 +1967,21 @@ void Sample::SelectBird (float x, float y)
 	}
 }
 
-void Sample::InitGraphs ()
+void Sample::Graph ( int id, float y, Vec4F clr )
 {
-	graph_t g;
-	for (int i=0; i < GRAPH_MAX; i++) {
-		g.x = 0;
-		memset ( &g.y[0], 0, 2048 * sizeof(float) );
-		g.clr = Vec4F(1,1,1,1);
-		m_graph.push_back ( g );
+	if ( id >= m_graph.size() ) {
+		while (id >= m_graph.size()) {			
+			graph_t ng;
+			ng.x = 0;
+			memset ( &ng.y[0], 0, 2048 * sizeof(float) );
+			ng.clr = clr;
+			m_graph.push_back ( ng );
+		}
 	}
-	m_graph[ GRAPH_BANK ].clr  = Vec4F(1,0,0,1 );				// red
-	m_graph[ GRAPH_PITCH ].clr = Vec4F(1,0.5,0,1 );			// orange
-	m_graph[ GRAPH_VEL ].clr   = Vec4F(0,1,0,1 );				// green
-	m_graph[ GRAPH_ACCEL ].clr = Vec4F(0,0,1,1 );				// blue
-
+	graph_t* g = &m_graph[id];
+	g->x++;
+	if ( g->x >= 2048 ) g->x = 0;
+	g->y[ int(g->x) ] = y;
 }
 
 void Sample::VisualizeSelectedBird ()
@@ -1996,20 +2007,34 @@ void Sample::VisualizeSelectedBird ()
 
 		m_bird_ndx = ndx;
 
+		// bird information
+		char msg[1024]; 
+		Vec4F tc (1,1,1,1);
+		sprintf ( msg, "thrust:  %4.3f\n", b->thrust.Length() );	drawText ( Vec2F(10, 30), msg, tc );
+		sprintf ( msg, "drag:    %4.3f\n", b->drag.Length() );		drawText ( Vec2F(10, 50), msg, tc );
+		sprintf ( msg, "lift:    %4.3f\n", b->lift.Length() );		drawText ( Vec2F(10, 70), msg, tc );
+		sprintf ( msg, "gravity: %4.3f\n", b->gravity.Length() );	drawText ( Vec2F(10, 90), msg, tc );
+		sprintf ( msg, "energy:  %4.6f\n", b->energy );						drawText ( Vec2F(10, 110), msg, tc );
+		sprintf ( msg, "speed:   %4.3f\n", b->speed );						drawText ( Vec2F(10, 130), msg, tc );
+		sprintf ( msg, "power:   %4.3f\n", b->power );						drawText ( Vec2F(10, 150), msg, tc );
+		sprintf ( msg, "flock energy: %4.6f\n", m_Flock.energy ); drawText ( Vec2F(10, 180), msg, tc );
+		sprintf ( msg, "flock speed:  %4.6f\n", m_Flock.speed );  drawText ( Vec2F(10, 200), msg, tc );
+
+		// graphs
+		/* Vec3F angs;
+		b->orient.toEuler ( angs );				
+		if (++m_graph[0].x >= 2048) m_graph[0].x = 0;
+		int x = m_graph[0].x;
+		Graph ( GRAPH_BANK,		x, angs.x, Vec4F(1,0,0,1) );
+		Graph ( GRAPH_PITCH,	x, angs.y, Vec4F(0,1,0,1) );
+		Graph ( GRAPH_VEL,		x, b->vel.Length(), Vec4F(0,0,1,1) );
+		*/
+
 		// visualize bird (green)
 		m_vis.push_back ( vis_t( b->pos, 1.1f, Vec4F(0,1,0,1), "" ) );
 
 		// visualize neighborhood radius (yellow)
 		m_vis.push_back ( vis_t( b->pos, m_Accel.psmoothradius, Vec4F(1,1,0,1), "" ) );
-
-		// graphs
-		Vec3F angs;
-		b->orient.toEuler ( angs );				
-		if (++m_graph[0].x >= 2048) m_graph[0].x = 0;
-		int x = m_graph[0].x;
-		m_graph[GRAPH_BANK].y[x] = angs.x;					// banking
-		m_graph[GRAPH_PITCH].y[x] = angs.y;					// pitch
-		m_graph[GRAPH_VEL].y[x] = b->vel.Length();	// velocity
 
 		// visulize neighbors		
 		if (m_gpu) {
@@ -2091,14 +2116,13 @@ void Sample::Run ()
 	//--- Advance predators
 	Advance_pred();	
 
-	//--- Update centroid
-	ComputeCentroid ();	
+	//--- Update flock data (centroid, energy)
 	UpdateFlockData ();
 
 	//--- Outputs 
 	// OutputPointCloudFiles ( m_frame );  
 	//OutputPlot ( 0, m_frame );
-	 OutputFFTW ( m_frame );
+	 //OutputFFTW ( m_frame );
 
 	#ifdef DEBUG_BIRD
 		DebugBird ( 7, "Post-Advance" );
@@ -2191,7 +2215,8 @@ bool Sample::init ()
 
 	PERF_INIT ( 64, false, true, false, 0, "");
 	
-	m_run = true;	
+	m_run = false;
+
 	m_cockpit_view = false;
 	m_draw_sphere = false;
 	m_draw_grid = false;
@@ -2243,9 +2268,6 @@ bool Sample::init ()
 	addSearchPath ( ASSET_PATH );	// <--- so fonts can be found
 
 	init2D ( "arial" );		 // loads the arial.tga font file
-
-
-	InitGraphs ();
 
 	// [optional Start GPU
 	if (m_gpu) {
@@ -2306,9 +2328,6 @@ void Sample::display ()
 			Run ();
 	}	
 
-	// Graph & visualize selected bird
-	VisualizeSelectedBird ();
-
 
 	// CameraToCentroid ();
 
@@ -2362,7 +2381,7 @@ void Sample::display ()
 			drawCircle3D(m_Flock.centroid, 0.5, Vec4F(Vec4F(0.804, 0.961, 0.008, 1)));
 		}
 
-		float bird_size = 0.05f;
+		float bird_size = 0.30f; //0.05f;
 		float predator_size = 0.1f;
 
 		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
@@ -2374,14 +2393,15 @@ void Sample::display ()
 				// visualize velocity
 				//float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);			
 				
-				if (b->clr.w==0) {
+				/*if (b->clr.w==0) {
 					// visualize angular acceleration
 					float v2 = b->ang_accel.Length() * 4.0; // 24.0;
 					drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ),	Vec4F(0, 1-v2, v2,1) );
 				} else {
 					// visualize bird status					
  					drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ),	b->clr );
-				}
+				}*/
+				drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ), Vec4F(1,1,1,1) );
 
 			} else {
 				// bird dart
@@ -2415,8 +2435,12 @@ void Sample::display ()
 
 	start2D ( w, h );			// this 2D draw is overlayed on top
 		
+		// Visualize selected bird
+		VisualizeSelectedBird ();
+
 		setTextSz ( 16, 0 );	
 
+		// Spectrum analysis 
 		if ( m_draw_plot ) {
 			// FFT plot
 		  drawImg ( &m_plot[0], Vec2F(0,0), Vec2F(PLOT_RESX, PLOT_RESY), Vec4F(1,1,1,1) );
@@ -2432,43 +2456,24 @@ void Sample::display ()
 			}
 		}
 
+		// Draw any graphs
+		if ( m_graph.size() > 0 ) {
+			Vec2F a,b;
+			drawRect ( Vec2F(0, 20), Vec2F(getWidth(), 420.f), Vec4F(.5,.5,.5,1 ));			
+			for (int k=0; k < m_graph.size(); k++) {
+				b = Vec3F( 0, 420 - m_graph[k].y[0], 0);
+				for (int x=0; x < 2084; x++) {
+					a = Vec3F( x, 420 - m_graph[k].y[x], 0);
+					drawLine ( a, b, m_graph[k].clr );
+					b = a;
+				}
+			}		
+		}
 
-		// current time
+		// Current time
 		/* sprintf ( msg, "t=%4.3f sec", m_time );	
 		setTextSz ( 24, 0 );						// set text height
 		drawText ( Vec2F(10, 10), msg, tc );					 */
-		
-		// selected bird
-		if ( m_bird_sel != -1) {
-			
-			Bird* bsel = (Bird*) m_Birds.GetElem ( FBIRD, m_bird_ndx );	// use index here
-			sprintf ( msg, "x: %f y: %f\n", getX(), getY() );
-			drawText ( Vec2F(10, 30), msg, tc );
-			sprintf ( msg, "pos: %f %f %f\n", bsel->pos.x, bsel->pos.y, bsel->pos.z );
-			drawText ( Vec2F(10, 50), msg, tc );
-			sprintf ( msg, "vel: %f %f %f = %f\n", bsel->vel.x, bsel->vel.y, bsel->vel.z, bsel->vel.Length() );
-			drawText ( Vec2F(10, 70), msg, tc );
-			sprintf ( msg, "power: %f\n", bsel->power );
-			drawText ( Vec2F(10, 90), msg, tc );			
-		
-			// Graph selected bird 
-			if (m_bird_sel != -1) {			
-				Vec2F a,b;
-				// draw graphs
-				drawRect ( Vec2F(0, 20), Vec2F(getWidth(), 420.f), Vec4F(.5,.5,.5,1 ));
-				drawLine ( Vec2F(0, 210), Vec2F(getWidth(), 210.f), Vec4F(.5,.5,.5,1 ));
-				for (int k=0; k < m_graph.size(); k++) {
-					b = Vec3F( 0, 210 - m_graph[k].y[0], 0);
-					for (int x=0; x < 2084; x++) {
-						a = Vec3F( x, 210 - m_graph[k].y[x], 0);
-						drawLine ( a, b, m_graph[k].clr );
-						b = a;
-					}
-				}
-			}
-		}
-		
-		// draw energy peaks
 
 	end2D(); 
 

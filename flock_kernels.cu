@@ -420,10 +420,8 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 				b->target.y -= pitch * FParams.avoid_pred_angular_amt; // / predatorDist;
 				b->clr = make_float4(1, 0, 1, 1);				
 			}
-		}
-		 
+		}		 
 	}	
-
 
 	//-------------- FLIGHT MODEL
 
@@ -432,11 +430,24 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	up    = quat_mult ( make_float3(0,1,0), b->orient );
 	right = quat_mult ( make_float3(0,0,1), b->orient );
 
+	force = make_float3(0,0,0);	
+	b->thrust = make_float3(0,0,0);
+
 	// Direction of motion
 	b->speed = length( b->vel );
 	vaxis = b->vel / b->speed;
-	if ( b->speed < FParams.min_speed) b->speed = FParams.min_speed;
-	if ( b->speed > FParams.max_speed) b->speed = FParams.max_speed;
+	b->power = 1.0;
+	if ( b->speed < FParams.min_speed) {
+		//b->speed = FParams.min_speed;
+		//b->thrust += vaxis * (FParams.min_speed - b->speed) * FParams.mass / dt;
+		L = FParams.min_speed / b->speed;
+		b->power = L * L;
+	} else if ( b->speed > FParams.max_speed) {
+		//b->speed = FParams.max_speed;
+		//b->thrust += vaxis * (FParams.max_speed - b->speed) * FParams.mass / dt;
+		L = FParams.max_speed / b->speed;
+		b->power = L * L;
+	}
 	if ( b->speed == 0) vaxis = fwd;
 
 	angs = quat_to_euler ( b->orient );
@@ -470,7 +481,6 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 
 	// Adjust velocity vector
 	b->vel = vaxis * b->speed;
-	force = make_float3(0,0,0);	
 
 	// Compute off-axis angle from neighborhood average	
 	f3 v0, v1;
@@ -487,21 +497,45 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	aoa = acos( dot(fwd, vaxis) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  	if (isnan(aoa)) aoa = 1;
 	// CL = sin(aoa*0.2) = coeff of lift, approximate CL curve with sin
-	L = sin( aoa * 0.2) * dynamic_pressure * FParams.lift_factor * 0.5;		// lift equation. L = CL (1/2 p v^2) A
-	lift = up * L;
-	force += lift;	
+	L = sin( aoa * 0.2) * dynamic_pressure * FParams.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
+	b->lift = (up * 0.98 + fwd * -0.02f) * L;
+	force += b->lift;	
 
 	// Drag force	
-	drag = vaxis * dynamic_pressure * FParams.drag_factor  * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
-	force += drag; 
+	b->drag = vaxis * dynamic_pressure * FParams.drag_factor  * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
+	force += b->drag; 
 
 	// Thrust force
-	thrust = fwd * b->power;
-	force += thrust;
+	b->thrust += fwd * b->power * FParams.power;
+	force += b->thrust;
 	
+	// Gravity force
+	b->gravity = FParams.gravity * FParams.mass;		// Fgrav = mg
+	force += b->gravity;	
+
+	// Ground avoidance
+	L = b->pos.y - FAccel.bound_min.y;
+	if ( L < FParams.bound_soften ) {			
+		L = (FParams.bound_soften - L) / FParams.bound_soften;
+		//force.y += L * FParams.avoid_ground_amt;
+		b->target.y += L * FParams.avoid_ground_amt;		
+	} 
+	// Ceiling avoidance
+	L = FAccel.bound_max.y - b->pos.y;
+	if ( L < FParams.bound_soften ) {	
+		L = (FParams.bound_soften - L) / FParams.bound_soften;
+		//force.y -= L * FParams.avoid_ground_amt;
+		b->target.y -= L * FParams.avoid_ceil_amt; 						
+	} 
+
+	// Compute energy used
+	// W = F * d * cos TH						// Total work by the bird (gravity not incl. in force)	
+	// W = Ftotal * (vel*dt) * 1
+	//float dy = (b->vel.y < 0) ? -b->vel.y : 0;
+	b->energy = dot ( force, b->vel * dt ) - dot( b->gravity, b->vel*dt );
+
 	// Integrate position		
 	accel = force / FParams.mass;						// body forces	
-	accel += FParams.gravity;								// gravity
 	accel += FParams.wind * FParams.air_density * FParams.front_area;				// wind force. Fw = w^2 p * A, where w=wind speed, p=air density, A=frontal area
 	
 	b->pos += b->vel * dt;
@@ -511,21 +545,6 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	if ( b->pos.x > FAccel.bound_max.x ) b->pos.x = FAccel.bound_min.x;
 	if ( b->pos.z < FAccel.bound_min.z ) b->pos.z = FAccel.bound_max.z;
 	if ( b->pos.z > FAccel.bound_max.z ) b->pos.z = FAccel.bound_min.z;	
-
-	// Ground avoidance
-	L = b->pos.y - FAccel.bound_min.y;
-	if ( L < FParams.bound_soften ) {			
-		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		b->target.y += L * FParams.avoid_ground_amt;
-		//b->power = FParams.avoid_ground_power;
-	} 
-
-	// Ceiling avoidance
-	L = FAccel.bound_max.y - b->pos.y;
-	if ( L < FParams.bound_soften ) {	
-		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		b->target.y -= L * FParams.avoid_ceil_amt; 						
-	} 
 
 	// Integrate velocity
 	b->vel += accel * dt;
@@ -571,6 +590,8 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 
 	force = make_float3(0,0,0);
 	b->clr = make_float4(0,0,0,0);			// default, visualize ang accel (w=0)
+
+	b->speed = length( b->vel );
 	
 	if ( b->r_nbrs > 0 ) {
 
@@ -589,20 +610,27 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 		dirj = b->ave_pos - b->pos;
 		force += dirj * FParams.reynolds_cohesion;
 	}
+	//force.y = 0;
 
 	// Ground avoidance (Y-)
 	float L = b->pos.y - FAccel.bound_min.y;
 	if ( L < FParams.bound_soften ) {			
 		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		force.y += L * L * FParams.avoid_ground_amt * 10;			
+		force.y += L * L * FParams.avoid_ground_amt * 5;
 	} 
 
 	// Ceiling avoidance (Y+)
 	L = FAccel.bound_max.y - b->pos.y;
 	if ( L < FParams.bound_soften ) {	
 		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		force.y -= L * L * FParams.avoid_ceil_amt * 10; 						
+		force.y -= L * L * FParams.avoid_ceil_amt * 5;
 	} 
+	
+	// Gravity force
+	b->gravity = FParams.gravity * FParams.mass;		// Fgrav = mg
+	//force += b->gravity;
+	// Lift force - exactly equal to gravity in Reynold's model
+	//force -= b->gravity;
 	
 	// Integrate position	& velocity
 	accel = force / FParams.mass;						// body forces	
@@ -610,7 +638,11 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	b->vel += accel * dt;
 	b->pos += b->vel * dt;
 
-	// Compute angular acceleration (comparison only, does not affect Reynold's sim)	
+	// Compute energy (read only, does not affect sim)	
+	float dy = (b->vel.y < 0) ? b->vel.y : 0;
+	b->energy = dot ( force, b->vel ) * dt - dot( b->gravity, b->vel ) *  dt;
+
+	// Compute angular acceleration (read only, does not affect sim)	
 	// b->orient = quat_from_directionup ( v0, make_float3(0,1,0) );
 	v1 = normalize ( b->vel );
 	q = quat_rotation_fromto ( v0, v1, 1.0 );	
@@ -626,6 +658,8 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	if ( b->speed < FParams.min_speed) b->speed = FParams.min_speed;
 	if ( b->speed > FParams.max_speed) b->speed = FParams.max_speed;
 	b->vel = b->vel * b->speed / length(b->vel);
+
+	b->vel.y *= 0.9999;
 
 	// Wrap boundaries (X/Z)
 	if ( b->pos.x < FAccel.bound_min.x ) b->pos.x = FAccel.bound_max.x;

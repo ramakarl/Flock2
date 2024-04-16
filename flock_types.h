@@ -69,8 +69,10 @@
 		f3			pos, vel, accel, target;
 		f3			ave_pos, ave_vel;
 		f3			ang_accel, ang_offaxis;
+		f3			lift, drag, thrust, gravity;
 		
 		float		speed, pitch_adv, power;	
+		float		energy;
 		int			id, near_j, t_nbrs, r_nbrs;
 	};
 
@@ -79,6 +81,8 @@
 	struct ALIGN(128) Flock {
 		
 		f3			centroid;
+		float		speed;
+		float		energy;
 
 		int			num_flocks;
 		f3			flock_centers[ MAX_FLOCKS ];
@@ -130,6 +134,7 @@
 		int			num_predators; 		// ****
 		float		DT;
 		float		mass;
+		float		power;
 		float		min_speed, max_speed;
 		float		min_power, max_power;
 		float		fov, fovcos;
