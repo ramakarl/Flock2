@@ -58,10 +58,10 @@
 	// *NOTE*
 	// Bird structure used for both CPU and GPU.
   // For GPU, a struct must follow memory alignment rules.
-  // This includes each 4-component member var (float4, quat4) must have 128-bit alignment.
-  // So we arrange those in the struct first, and ensure other align to 128-bits (16 bytes).
+  // This includes each 4-component member var (float4, quat4) must have 16 bytes alignment.
+  // So we arrange those in the struct first, and ensure other align to 16 bytes.
 	//
-	struct ALIGN(128) Bird {
+	struct ALIGN(16) Bird {
 		
 		q4			orient;
 		f4			clr;
@@ -71,18 +71,18 @@
 		f3			ang_accel, ang_offaxis;
 		f3			lift, drag, thrust, gravity;
 		
-		float		speed, pitch_adv, power;	
-		float		energy;
 		int			id, near_j, t_nbrs, r_nbrs;
+		float		speed, pitch_adv, power;	
+		float		Plift, Pdrag, Pfwd, Pturn, Ptotal;		
 	};
 
 	// entire flock states
 
-	struct ALIGN(128) Flock {
+	struct ALIGN(16) Flock {
 		
 		f3			centroid;
 		float		speed;
-		float		energy;
+		float		Plift, Pdrag, Pfwd, Pturn, Ptotal;
 
 		int			num_flocks;
 		f3			flock_centers[ MAX_FLOCKS ];
@@ -94,7 +94,7 @@
 		FOLLOW		// state3
 	};
 
-	struct ALIGN(128) Predator {	// **** struct for predator
+	struct ALIGN(16) Predator {	// **** struct for predator
 
 		q4			orient;
 		f4			clr;

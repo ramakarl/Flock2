@@ -497,8 +497,9 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	aoa = acos( dot(fwd, vaxis) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  	if (isnan(aoa)) aoa = 1;
 	// CL = sin(aoa*0.2) = coeff of lift, approximate CL curve with sin
-	L = sin( aoa * 0.2) * dynamic_pressure * FParams.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
-	b->lift = (up * 0.98 + fwd * -0.02f) * L;
+	L = (sin( aoa * 0.1)+0.5) * dynamic_pressure * FParams.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
+	//b->lift = (up * 0.98 + fwd * -0.02f) * L;
+	b->lift = up * L;
 	force += b->lift;	
 
 	// Drag force	
@@ -528,11 +529,22 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 		b->target.y -= L * FParams.avoid_ceil_amt; 						
 	} 
 
-	// Compute energy used
-	// W = F * d * cos TH						// Total work by the bird (gravity not incl. in force)	
-	// W = Ftotal * (vel*dt) * 1
-	//float dy = (b->vel.y < 0) ? -b->vel.y : 0;
-	b->energy = dot ( force, b->vel * dt ) - dot( b->gravity, b->vel*dt );
+	// Compute energy used (stats, read only)
+	// w = F . d											// Work is force applied over displacement
+	// P = w/t												// Power is work divided by time
+	// P = W V												// from Pennycuick, where W = weight in Newtons = mg, V = velocity
+	b->Plift = length( b->lift ) * b->speed;			// lift is force applied to move air downward
+	b->Pdrag = length( b->drag ) * b->speed;			// drag is force against motion (profile + parasitic drag)
+	// compute force vector, after eliminating lift, drag, gravity
+	f3 acc = (force - b->lift - b->drag - b->gravity) * dt / FParams.mass;	
+	b->Pfwd = dot ( acc , vaxis );									// energy for forward acceleration (beyond drag)
+	b->Pturn = length( acc - b->Pfwd * vaxis );			// energy for turning 
+	// total energy/bird = lift + drag + fwd energy + turn energy
+	b->Ptotal = b->Plift + b->Pdrag + b->Pfwd + b->Pturn; 
+
+	//float cl = min( (b->Pfwd-0.0187) * 10000.0f, 1.0);
+	//float cl = min( b->Pturn * 1000.0f, 1.0);
+	//b->clr = make_float4( 1-cl, cl, 0, 1);
 
 	// Integrate position		
 	accel = force / FParams.mass;						// body forces	
@@ -613,18 +625,18 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	//force.y = 0;
 
 	// Ground avoidance (Y-)
-	float L = b->pos.y - FAccel.bound_min.y;
+	/*float L = b->pos.y - FAccel.bound_min.y;
 	if ( L < FParams.bound_soften ) {			
 		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		force.y += L * L * FParams.avoid_ground_amt * 5;
+		force.y += L * FParams.avoid_ground_amt * 5;
 	} 
 
 	// Ceiling avoidance (Y+)
 	L = FAccel.bound_max.y - b->pos.y;
 	if ( L < FParams.bound_soften ) {	
 		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		force.y -= L * L * FParams.avoid_ceil_amt * 5;
-	} 
+		force.y -= L * FParams.avoid_ceil_amt * 5;
+	} */
 	
 	// Gravity force
 	b->gravity = FParams.gravity * FParams.mass;		// Fgrav = mg
@@ -634,15 +646,40 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	
 	// Integrate position	& velocity
 	accel = force / FParams.mass;						// body forces	
-	v0 = normalize ( b->vel );
-	b->vel += accel * dt;
-	b->pos += b->vel * dt;
+	v0 = normalize ( b->vel );	
 
-	// Compute energy (read only, does not affect sim)	
-	float dy = (b->vel.y < 0) ? b->vel.y : 0;
-	b->energy = dot ( force, b->vel ) * dt - dot( b->gravity, b->vel ) *  dt;
+	// Compute energy used (stats, read only)
+	// w = F . d											// Work is force applied over displacement
+	// P = w/t												// Power is work divided by time
+	// P = W V												// from Pennycuick, where W = weight in Newtons = mg, V = velocity
+	// -- compute lift, does not affect Reynolds sim
+	float airflow = b->speed;			// airflow = air over wing due to speed + external wind	
+	float dynamic_pressure = 0.5f * FParams.air_density * airflow * airflow;	
+	// assume constant CL = 1.25
+	float L = 0.75 * dynamic_pressure * FParams.lift_factor * 1.0;			// lift equation. L = CL (1/2 p v^2) A	
+	b->lift = make_float3(0,1,0) * L;
+	// -- compute drag, does not affect Reynolds sim
+	float D = dynamic_pressure * FParams.drag_factor  * 1.0f;		// drag equation. D = Cd (1/2 p v^2) A
+	b->drag = normalize( b->vel ) * -D;
+	// -- compute gravity, does not affect Reynolds sim	
+	b->gravity = FParams.gravity * FParams.mass;		// Fgrav = mg
 
-	// Compute angular acceleration (read only, does not affect sim)	
+	// compute energies
+	b->Plift = L * b->speed;			// lift is force applied to move air downward
+	b->Pdrag = D * b->speed;			// drag is force against motion (profile + parasitic drag)
+	// compute force vector, after eliminating lift, drag, gravity
+	f3 acc = (force - b->lift - b->drag - b->gravity) * dt / FParams.mass;	
+	f3 vaxis = b->vel / b->speed;
+	b->Pfwd = dot ( acc , vaxis );									// energy for forward acceleration (beyond drag)
+	b->Pturn = length( acc - b->Pfwd * vaxis );			// energy for turning 
+	// total energy/bird = lift + drag + fwd energy + turn energy
+	b->Ptotal = b->Plift + b->Pdrag + b->Pfwd + b->Pturn;
+
+	// visualize turn energy	
+	float cl = min( b->Pturn * 100.0f, 1.0);
+	b->clr = make_float4( 1-cl, cl, 0, 1);	
+
+	// Compute angular acceleration, does not affect sim
 	// b->orient = quat_from_directionup ( v0, make_float3(0,1,0) );
 	v1 = normalize ( b->vel );
 	q = quat_rotation_fromto ( v0, v1, 1.0 );	
@@ -652,6 +689,10 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	v1 = normalize ( b->ave_vel );
 	q = quat_rotation_fromto ( v0, v1, 1.0 );	
 	b->ang_offaxis = quat_to_euler ( q ) ;
+
+	// Integrate position and velocity 
+	b->vel += accel * dt;
+	b->pos += b->vel * dt;
 
 	// Speed limit
 	b->speed = length( b->vel );	
@@ -666,6 +707,9 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	if ( b->pos.x > FAccel.bound_max.x ) b->pos.x = FAccel.bound_min.x;
 	if ( b->pos.z < FAccel.bound_min.z ) b->pos.z = FAccel.bound_max.z;
 	if ( b->pos.z > FAccel.bound_max.z ) b->pos.z = FAccel.bound_min.z;	
+
+	if ( b->pos.y < FAccel.bound_min.y ) b->pos.y = FAccel.bound_max.y;
+	if ( b->pos.y > FAccel.bound_max.y ) b->pos.y = FAccel.bound_min.y;	
 
 	#ifdef DEBUG_BIRD
 		if (b->id == DEBUG_BIRD) {

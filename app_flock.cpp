@@ -67,7 +67,7 @@ struct graph_t {
 #define GRAPH_ACCEL		3
 #define GRAPH_MAX			4
 
-#define NUM_BIRDS		5000
+#define NUM_BIRDS		10000
 
 #define SAMPLES			16384
 #define PLOT_RESX		2048
@@ -303,9 +303,10 @@ void Sample::DefaultParams ()
 	//
 	m_Params.steps = 2;
 	m_Params.DT = 0.005;							// timestep (sec), .005 = 5 msec = 200 hz
-	m_Params.mass =	0.1;							// bird mass (kg)
+	//m_Params.mass =	0.350;						// bird mass (kg) - pigeon
+	m_Params.mass =	0.08;							// bird mass (kg) - starling
 	m_Params.power = 0.3;							// 100% power (in joules)
-	m_Params.min_speed = 7.2;					// min speed (m/s)		// Demsar2014
+	m_Params.min_speed = 7.0;					// min speed (m/s)		// Demsar2014
 	m_Params.max_speed = 18;					// max speed (m/s)		// Demsar2014	
 	//m_Params.min_speed = 1.0;					// min speed (m/s)		// Demsar2014
 	//m_Params.max_speed = 4.0;					// max speed (m/s)		// Demsar2014	
@@ -317,22 +318,22 @@ void Sample::DefaultParams ()
 	
 	// social factors
 	m_Params.border_cnt = 30;						// border width (# birds)	
-	m_Params.border_amt = 0.05f;				// border steering amount (keep <0.1)	
+	m_Params.border_amt = 0.10f;				// border steering amount (keep <0.1)	
 	//m_Params.border_amt = 0.0f;
 	m_Params.avoid_angular_amt= 0.02f;	// bird angular avoidance amount
 	m_Params.avoid_power_amt =	0.02f;	// power avoidance amount (N)
 	m_Params.avoid_power_ctr =	3;			// power avoidance center (N)	
-	m_Params.align_amt = 1.000f;				// bird alignment amount
-	m_Params.cohesion_amt =	0.001f;			// bird cohesion amount
+	m_Params.align_amt = 0.600f;				// bird alignment amount
+	m_Params.cohesion_amt =	0.004f;			// bird cohesion amount
 
 	// flight parameters
-	m_Params.lift_factor = 0.0500;			// lift factor
-	m_Params.drag_factor = 0.0060;			// drag factor (L/D ratio 10:1)
+	m_Params.lift_factor = 0.0400;			// lift factor
+	m_Params.drag_factor = 0.0070;			// drag factor (L/D ratio 10:1)
 	m_Params.safe_radius = 2.0;					// radius of avoidance (m)
 	m_Params.pitch_decay = 0.95;				// pitch decay (return to level flight)
 	m_Params.pitch_min = -40;						// min pitch (degrees)
 	m_Params.pitch_max = 40;						// max pitch (degrees)	
-	m_Params.reaction_delay = 0.0003f;			// reaction delay
+	m_Params.reaction_delay = 0.0005f;			// reaction delay
 	m_Params.dynamic_stability = 0.6f;			// dyanmic stability factor
 	m_Params.air_density = 1.225;				// air density (kg/m^3)
 	m_Params.gravity = Vec3F(0, -9.8, 0);		// gravity (m/s^2)
@@ -362,9 +363,13 @@ void Sample::DefaultParams ()
 	m_Params.border_amt = 0.0f;  */
 
 	// Reynold's Classic model	
-	m_Params.reynolds_avoidance = 0.15;
-	m_Params.reynolds_cohesion =  0.09;
-	m_Params.reynolds_alignment = 0.50;
+	//m_Params.reynolds_avoidance = 0.15;
+	//m_Params.reynolds_cohesion =  0.09;
+	//m_Params.reynolds_alignment = 0.50;
+	
+	m_Params.reynolds_avoidance = 0.2;
+	m_Params.reynolds_cohesion =  0.1;
+	m_Params.reynolds_alignment = 0.5;
 	
 }
 
@@ -392,6 +397,8 @@ void Sample::Reset (int num, int num_pred )
 	m_Birds.AddBuffer ( FBIRD,  "bird",		sizeof(Bird),	numPoints, usage );
 	m_Birds.AddBuffer ( FGCELL, "gcell",	sizeof(uint),	numPoints, usage );
 	m_Birds.AddBuffer ( FGNDX,  "gndx",		sizeof(uint),	numPoints, usage );	
+
+	dbgprintf ( "Bird sz: %d\n", sizeof(Bird)) ;
 
 	// -------- PREDATOR -----
 	m_Predators.DeleteAllBuffers();
@@ -1027,8 +1034,9 @@ void Sample::DebugBird ( int id, std::string msg )
 void Sample::UpdateFlockData ()
 {	
 	Vec3F centroid (0,0,0);	
-	float speed = 0;
-	float energy = 0;
+	float speed = 0;	
+	float plift = 0, pdrag = 0;
+	float pfwd = 0, pturn=0, ptotal = 0;
 
 	// compute centroid & energy of birds
 	Bird* b;	
@@ -1036,15 +1044,26 @@ void Sample::UpdateFlockData ()
 		b = (Bird*) m_Birds.GetElem( FBIRD, i);		
 		centroid += b->pos;
 		speed += b->speed;
-		energy += (b->energy > 0) ? b->energy : 0;
+		plift += b->Plift;
+		pdrag += b->Pdrag;
+		pfwd  += b->Pfwd;
+		pturn += b->Pturn;
+		ptotal += b->Ptotal;
 	}
 	centroid *= (1.0f / m_Params.num_birds);
 		
 	m_Flock.centroid = centroid;
 	m_Flock.speed = speed / m_Params.num_birds;
-	m_Flock.energy = energy / m_Params.num_birds;
+	m_Flock.Plift = plift / m_Params.num_birds;
+	m_Flock.Pdrag = pdrag / m_Params.num_birds;	
+	m_Flock.Pfwd =  pfwd / m_Params.num_birds;	
+	m_Flock.Pturn = pturn / m_Params.num_birds;	
+	m_Flock.Ptotal = ptotal / m_Params.num_birds;		
 
-	Graph ( 0, m_Flock.energy * 10000.0, Vec4F(1,0,0,1) );
+	if ( m_frame % 8 == 0 ) {
+		//Graph ( 0, (m_Flock.Pturn - 0.02) * 5000.0, Vec4F(1,0,0,1) );
+		Graph ( 0, (m_Flock.Pturn - 0.00030) * 200000.0, Vec4F(1,0,0,1) );
+	}
 
 	if ( m_gpu ) {
 		#ifdef BUILD_CUDA
@@ -1546,7 +1565,7 @@ void Sample::AdvanceByOrientation ()
 			aoa = acos( fwd.Dot( vaxis ) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  			if (isnan(aoa)) aoa = 1;
 			// CL = sin(aoa * 0.2) = coeff of lift, approximate CL curve with sin
-			L = sin( aoa * 0.2) * dynamic_pressure * m_Params.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
+			L = (sin( aoa * 0.1)+0.5) * dynamic_pressure * m_Params.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
 			lift = up * L;
 			force += lift;
 
@@ -1994,7 +2013,7 @@ void Sample::VisualizeSelectedBird ()
 	// search for the index of this bird
 	m_vis.clear ();	
 	Bird* b;
-	int ndx = -1;
+	int ndx = -1;	
 	for (int i=0; i < m_Params.num_birds; i++) {
 		b = (Bird*) m_Birds.GetElem ( FBIRD, i );
 		if ( b->id == m_bird_sel )  {
@@ -2003,81 +2022,96 @@ void Sample::VisualizeSelectedBird ()
 		}
 	}
 
-	if (ndx != -1 ) {
-
-		m_bird_ndx = ndx;
-
-		// bird information
-		char msg[1024]; 
-		Vec4F tc (1,1,1,1);
-		sprintf ( msg, "thrust:  %4.3f\n", b->thrust.Length() );	drawText ( Vec2F(10, 30), msg, tc );
-		sprintf ( msg, "drag:    %4.3f\n", b->drag.Length() );		drawText ( Vec2F(10, 50), msg, tc );
-		sprintf ( msg, "lift:    %4.3f\n", b->lift.Length() );		drawText ( Vec2F(10, 70), msg, tc );
-		sprintf ( msg, "gravity: %4.3f\n", b->gravity.Length() );	drawText ( Vec2F(10, 90), msg, tc );
-		sprintf ( msg, "energy:  %4.6f\n", b->energy );						drawText ( Vec2F(10, 110), msg, tc );
-		sprintf ( msg, "speed:   %4.3f\n", b->speed );						drawText ( Vec2F(10, 130), msg, tc );
-		sprintf ( msg, "power:   %4.3f\n", b->power );						drawText ( Vec2F(10, 150), msg, tc );
-		sprintf ( msg, "flock energy: %4.6f\n", m_Flock.energy ); drawText ( Vec2F(10, 180), msg, tc );
-		sprintf ( msg, "flock speed:  %4.6f\n", m_Flock.speed );  drawText ( Vec2F(10, 200), msg, tc );
-
-		// graphs
-		/* Vec3F angs;
-		b->orient.toEuler ( angs );				
-		if (++m_graph[0].x >= 2048) m_graph[0].x = 0;
-		int x = m_graph[0].x;
-		Graph ( GRAPH_BANK,		x, angs.x, Vec4F(1,0,0,1) );
-		Graph ( GRAPH_PITCH,	x, angs.y, Vec4F(0,1,0,1) );
-		Graph ( GRAPH_VEL,		x, b->vel.Length(), Vec4F(0,0,1,1) );
-		*/
-
-		// visualize bird (green)
-		m_vis.push_back ( vis_t( b->pos, 1.1f, Vec4F(0,1,0,1), "" ) );
-
-		// visualize neighborhood radius (yellow)
-		m_vis.push_back ( vis_t( b->pos, m_Accel.psmoothradius, Vec4F(1,1,0,1), "" ) );
-
-		// visulize neighbors		
-		if (m_gpu) {
-			#ifdef BUILD_CUDA
-				m_Birds.Retrieve ( FGCELL );
-				m_Grid.RetrieveAll ();
-				cuCtxSynchronize();
-			#endif
-		}
-		int gc = m_Birds.bufUI(FGCELL)[ ndx ];
-		if ( gc != GRID_UNDEF ) {			
-			Bird* bj;
-			float dsq, ave_dist = 0;
-			Vec3F dist;
-			uint j, cell, ncnt = 0;			
-
-			// find neighbors
-			float rd2 = (m_Accel.psmoothradius*m_Accel.psmoothradius) / (m_Accel.sim_scale * m_Accel.sim_scale);
-			gc -= (m_Accel.gridRes.z + 1)*m_Accel.gridRes.x + 1;
-			for (int c=0; c < m_Accel.gridAdjCnt; c++) {
-				cell = gc + m_Accel.gridAdj[c];
-				int clast = m_Grid.bufUI(AGRIDOFF)[cell] + m_Grid.bufUI(AGRIDCNT)[cell];
-				for ( int cndx = m_Grid.bufUI(AGRIDOFF)[cell]; cndx < clast; cndx++ ) {		
-						// get next possible neighbor
-						j = m_Grid.bufUI(AGRID)[cndx];
-						if (j==ndx) continue;
-						bj = (Bird*) m_Birds.GetElem ( FBIRD, j );
-						dist = b->pos - bj->pos;
-						dsq = (dist.x*dist.x + dist.y*dist.y + dist.z*dist.z);
-						if ( dsq < rd2 ) {							
-							ave_dist += sqrt( dsq );
-							ncnt++;
-							m_vis.push_back ( vis_t( bj->pos, 0.5f, Vec4F(1,1,0,1), "" ) );		// neighbor birds (yellow)
-						}
-				}
-			}
-			if ( ncnt > 0) {
-				ave_dist /= ncnt;
-				// printf ( "ave dist: %f\n", ave_dist );
-			}
-		}					
-
+	if (ndx == -1 ) {
+		dbgprintf ( "bird not found: %d\n", m_bird_sel);
+		return;
 	}
+
+	m_bird_ndx = ndx;
+
+	// bird information
+	char msg[1024]; 
+	Vec4F tc (1,1,1,1);
+	sprintf ( msg, "thrust:  %4.3f N", b->thrust.Length() );	drawText ( Vec2F(10, 30), msg, tc );
+	sprintf ( msg, "drag:    %4.3f N", b->drag.Length() );		drawText ( Vec2F(10, 50), msg, tc );
+	sprintf ( msg, "lift:    %4.3f N", b->lift.Length() );		drawText ( Vec2F(10, 70), msg, tc );
+	float LD = b->lift.Length() / b->drag.Length();
+	sprintf ( msg, "L/D:     %4.1f", LD );				  					drawText ( Vec2F(10, 90), msg, tc );
+	sprintf ( msg, "gravity: %4.3f N", b->gravity.Length() );	drawText ( Vec2F(10, 110), msg, tc );
+	sprintf ( msg, "Plift:   %4.3f watts", b->Plift );				drawText ( Vec2F(10, 130), msg, tc );
+	sprintf ( msg, "Pdrag:   %4.3f watts", b->Pdrag );				drawText ( Vec2F(10, 150), msg, tc );
+	sprintf ( msg, "Pfwd:    %4.6f watts", b->Pfwd );				drawText ( Vec2F(10, 170), msg, tc );
+	sprintf ( msg, "Pturn:   %4.6f watts", b->Pturn );			drawText ( Vec2F(10, 190), msg, tc );
+	// Pfwd = Pprof + Ppara   (Pfwd = profile + parasitic power, and Pdrag is already included)
+	float P = b->Plift + b->Pfwd + b->Pturn;
+	sprintf ( msg, "Ptotal:  %4.3f watts", P );							drawText ( Vec2F(10, 210), msg, tc );
+	sprintf ( msg, "speed:   %4.3f m/s", b->speed );				drawText ( Vec2F(10, 230), msg, tc );
+	sprintf ( msg, "thrust:  %4.3f", b->power );						drawText ( Vec2F(10, 250), msg, tc );		
+		
+	sprintf ( msg, "ave. lift:  %4.3f watts / bird", m_Flock.Plift );		drawText ( Vec2F(10, 280), msg, tc );
+	sprintf ( msg, "ave. drag:  %4.3f watts / bird", m_Flock.Pdrag );		drawText ( Vec2F(10, 300), msg, tc );
+	sprintf ( msg, "ave. fwd:   %4.6f watts / bird", m_Flock.Pfwd );		drawText ( Vec2F(10, 320), msg, tc );
+	sprintf ( msg, "ave. turn:  %4.6f watts / bird", m_Flock.Pturn );		drawText ( Vec2F(10, 340), msg, tc );
+	sprintf ( msg, "ave. total: %4.3f watts / bird", m_Flock.Ptotal );	drawText ( Vec2F(10, 360), msg, tc );
+	sprintf ( msg, "ave. speed: %4.6f m/s", m_Flock.speed );						drawText ( Vec2F(10, 380), msg, tc );
+
+	// graphs
+	/* Vec3F angs;
+	b->orient.toEuler ( angs );				
+	if (++m_graph[0].x >= 2048) m_graph[0].x = 0;
+	int x = m_graph[0].x;
+	Graph ( GRAPH_BANK,		x, angs.x, Vec4F(1,0,0,1) );
+	Graph ( GRAPH_PITCH,	x, angs.y, Vec4F(0,1,0,1) );
+	Graph ( GRAPH_VEL,		x, b->vel.Length(), Vec4F(0,0,1,1) );
+	*/
+
+	// visualize bird (green)
+	m_vis.push_back ( vis_t( b->pos, 1.1f, Vec4F(0,1,0,1), "" ) );
+
+	// visualize neighborhood radius (yellow)
+	m_vis.push_back ( vis_t( b->pos, m_Accel.psmoothradius, Vec4F(1,1,0,1), "" ) );
+
+	// visulize neighbors		
+	if (m_gpu) {
+		#ifdef BUILD_CUDA
+			m_Birds.Retrieve ( FGCELL );
+			m_Grid.RetrieveAll ();
+			cuCtxSynchronize();
+		#endif
+	}
+	int gc = m_Birds.bufUI(FGCELL)[ ndx ];
+	if ( gc != GRID_UNDEF ) {			
+		Bird* bj;
+		float dsq, ave_dist = 0;
+		Vec3F dist;
+		uint j, cell, ncnt = 0;			
+
+		// find neighbors
+		float rd2 = (m_Accel.psmoothradius*m_Accel.psmoothradius) / (m_Accel.sim_scale * m_Accel.sim_scale);
+		gc -= (m_Accel.gridRes.z + 1)*m_Accel.gridRes.x + 1;
+		for (int c=0; c < m_Accel.gridAdjCnt; c++) {
+			cell = gc + m_Accel.gridAdj[c];
+			int clast = m_Grid.bufUI(AGRIDOFF)[cell] + m_Grid.bufUI(AGRIDCNT)[cell];
+			for ( int cndx = m_Grid.bufUI(AGRIDOFF)[cell]; cndx < clast; cndx++ ) {		
+					// get next possible neighbor
+					j = m_Grid.bufUI(AGRID)[cndx];
+					if (j==ndx) continue;
+					bj = (Bird*) m_Birds.GetElem ( FBIRD, j );
+					dist = b->pos - bj->pos;
+					dsq = (dist.x*dist.x + dist.y*dist.y + dist.z*dist.z);
+					if ( dsq < rd2 ) {							
+						ave_dist += sqrt( dsq );
+						ncnt++;
+						m_vis.push_back ( vis_t( bj->pos, 0.5f, Vec4F(1,1,0,1), "" ) );		// neighbor birds (yellow)
+					}
+			}
+		}
+		if ( ncnt > 0) {
+			ave_dist /= ncnt;
+			// printf ( "ave dist: %f\n", ave_dist );
+		}
+	}					
+
 }
 
 
@@ -2215,7 +2249,7 @@ bool Sample::init ()
 
 	PERF_INIT ( 64, false, true, false, 0, "");
 	
-	m_run = false;
+	m_run = true;
 
 	m_cockpit_view = false;
 	m_draw_sphere = false;
@@ -2393,15 +2427,15 @@ void Sample::display ()
 				// visualize velocity
 				//float v = (b->vel.Length() - m_Params.min_speed) / (m_Params.max_speed - m_Params.min_speed);			
 				
-				/*if (b->clr.w==0) {
+				if (b->clr.w==0) {
 					// visualize angular acceleration
 					float v2 = b->ang_accel.Length() * 4.0; // 24.0;
 					drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ),	Vec4F(0, 1-v2, v2,1) );
 				} else {
 					// visualize bird status					
  					drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ),	b->clr );
-				}*/
-				drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ), Vec4F(1,1,1,1) );
+				}
+				//drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ), Vec4F(1,1,1,1) );
 
 			} else {
 				// bird dart
@@ -2455,6 +2489,15 @@ void Sample::display ()
 				drawLine ( Vec2F(m_lines[k].x, m_lines[k].y), Vec2F(m_lines[k].z, m_lines[k].w), Vec4F(1,1,1,1) );
 			}
 		}
+
+		// Energy scatter plot		
+		/* clr = Vec4F(0,0,1,1);
+		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
+			b = (Bird*) m_Birds.GetElem(0, n);
+			//clr = (b->Pfwd > 0.0001 ) ? Vec4F(1,0,0,1) : Vec4F(0,0,1,1) ;
+			drawCircle ( Vec2F(b->speed*50, 1000 - b->Ptotal*10), 1.0, clr);
+		} */
+
 
 		// Draw any graphs
 		if ( m_graph.size() > 0 ) {
