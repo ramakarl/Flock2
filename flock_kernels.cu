@@ -397,8 +397,9 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 			dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
 			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 			pitch = asin( dirj.y )*RADtoDEG;
-			b->target.z +=   yaw * FParams.border_amt;
-			b->target.y += pitch * FParams.border_amt;		
+			d = (FParams.border_cnt - b->r_nbrs ) / FParams.border_cnt;
+			b->target.z +=   yaw * FParams.border_amt * d;
+			b->target.y += pitch * FParams.border_amt * d;
 		}
 
 		// Rule 5. Bird-Predators avoidance
@@ -494,16 +495,18 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	float dynamic_pressure = 0.5f * FParams.air_density * airflow * airflow;
 
 	// Lift force
-	aoa = acos( dot(fwd, vaxis) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
- 	if (isnan(aoa)) aoa = 1;
-	// CL = sin(aoa*0.2) = coeff of lift, approximate CL curve with sin
-	L = (sin( aoa * 0.1)+0.5) * dynamic_pressure * FParams.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
-	//b->lift = (up * 0.98 + fwd * -0.02f) * L;
+	//-- dynamic CL
+	// aoa = acos( dot(fwd, vaxis) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
+ 	// if (isnan(aoa)) aoa = 1;	
+	// L = (sin( aoa * 0.1)+0.5) * dynamic_pressure * FParams.lift_factor * FParams.wing_area;		// lift equation. L = CL (1/2 p v^2) A
+	//-- fixed CL
+	L = dynamic_pressure * FParams.lift_factor * FParams.wing_area;		// lift equation. L = CL (1/2 p v^2) A
+
 	b->lift = up * L;
 	force += b->lift;	
 
 	// Drag force	
-	b->drag = vaxis * dynamic_pressure * FParams.drag_factor  * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
+	b->drag = vaxis * dynamic_pressure * -FParams.drag_factor  * FParams.wing_area;			// drag equation. D = Cd (1/2 p v^2) A
 	force += b->drag; 
 
 	// Thrust force
@@ -536,11 +539,13 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	b->Plift = length( b->lift ) * b->speed;			// lift is force applied to move air downward
 	b->Pdrag = length( b->drag ) * b->speed;			// drag is force against motion (profile + parasitic drag)
 	// compute force vector, after eliminating lift, drag, gravity
-	f3 acc = (force - b->lift - b->drag - b->gravity) * dt / FParams.mass;	
-	b->Pfwd = dot ( acc , vaxis );									// energy for forward acceleration (beyond drag)
-	b->Pturn = length( acc - b->Pfwd * vaxis );			// energy for turning 
+	float Fresidual = length(force - b->lift - b->drag - b->gravity);
+	f3 delta_v = (force - b->lift - b->drag - b->gravity) * dt / FParams.mass;	
+	float vdotv = dot ( delta_v, vaxis );
+	b->Pfwd = Fresidual * vdotv;															// energy for forward acceleration (beyond drag)
+	b->Pturn = Fresidual * length( delta_v - vdotv * vaxis );	 // energy for turning 
 	// total energy/bird = lift + drag + fwd energy + turn energy
-	b->Ptotal = b->Plift + b->Pdrag + b->Pfwd + b->Pturn; 
+	b->Ptotal = b->Plift + b->Pdrag + b->Pfwd + b->Pturn;
 
 	//float cl = min( (b->Pfwd-0.0187) * 10000.0f, 1.0);
 	//float cl = min( b->Pturn * 1000.0f, 1.0);
@@ -648,7 +653,7 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	accel = force / FParams.mass;						// body forces	
 	v0 = normalize ( b->vel );	
 
-	// Compute energy used (stats, read only)
+	// [stats only] Compute energy used
 	// w = F . d											// Work is force applied over displacement
 	// P = w/t												// Power is work divided by time
 	// P = W V												// from Pennycuick, where W = weight in Newtons = mg, V = velocity
@@ -656,39 +661,29 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	float airflow = b->speed;			// airflow = air over wing due to speed + external wind	
 	float dynamic_pressure = 0.5f * FParams.air_density * airflow * airflow;	
 	// assume constant CL = 1.25
-	float L = 0.75 * dynamic_pressure * FParams.lift_factor * 1.0;			// lift equation. L = CL (1/2 p v^2) A	
+	f3 vaxis = b->vel / b->speed;			// normalized direction of velocity 
+	float L = dynamic_pressure * FParams.lift_factor * FParams.wing_area;			// lift equation. L = CL (1/2 p v^2) A	
 	b->lift = make_float3(0,1,0) * L;
 	// -- compute drag, does not affect Reynolds sim
-	float D = dynamic_pressure * FParams.drag_factor  * 1.0f;		// drag equation. D = Cd (1/2 p v^2) A
-	b->drag = normalize( b->vel ) * -D;
+	float D = dynamic_pressure * FParams.drag_factor  * FParams.wing_area;		// drag equation. D = Cd (1/2 p v^2) A
+	b->drag = vaxis * -D;
 	// -- compute gravity, does not affect Reynolds sim	
 	b->gravity = FParams.gravity * FParams.mass;		// Fgrav = mg
-
-	// compute energies
-	b->Plift = L * b->speed;			// lift is force applied to move air downward
-	b->Pdrag = D * b->speed;			// drag is force against motion (profile + parasitic drag)
+	// -- compute energies
+	b->Plift = L * b->speed;					// lift is force applied to move air downward
+	b->Pdrag = D * b->speed;					// drag is force against motion (profile + parasitic drag)
 	// compute force vector, after eliminating lift, drag, gravity
-	f3 acc = (force - b->lift - b->drag - b->gravity) * dt / FParams.mass;	
-	f3 vaxis = b->vel / b->speed;
-	b->Pfwd = dot ( acc , vaxis );									// energy for forward acceleration (beyond drag)
-	b->Pturn = length( acc - b->Pfwd * vaxis );			// energy for turning 
+	float Fresidual = length(force - b->lift - b->drag - b->gravity);
+	f3 delta_v = (force - b->lift - b->drag - b->gravity) * dt / FParams.mass;		
+	float vdotv = dot ( delta_v, vaxis );
+	b->Pfwd = Fresidual * vdotv;															// energy for forward acceleration (beyond drag)
+	b->Pturn = Fresidual * length( delta_v - vdotv * vaxis );	 // energy for turning 
 	// total energy/bird = lift + drag + fwd energy + turn energy
 	b->Ptotal = b->Plift + b->Pdrag + b->Pfwd + b->Pturn;
 
-	// visualize turn energy	
+	// [stats only] visualize turn energy	
 	float cl = min( b->Pturn * 100.0f, 1.0);
 	b->clr = make_float4( 1-cl, cl, 0, 1);	
-
-	// Compute angular acceleration, does not affect sim
-	// b->orient = quat_from_directionup ( v0, make_float3(0,1,0) );
-	v1 = normalize ( b->vel );
-	q = quat_rotation_fromto ( v0, v1, 1.0 );	
-	b->ang_accel = quat_to_euler ( q );
-
-	// Compute angle from neighborhood average	
-	v1 = normalize ( b->ave_vel );
-	q = quat_rotation_fromto ( v0, v1, 1.0 );	
-	b->ang_offaxis = quat_to_euler ( q ) ;
 
 	// Integrate position and velocity 
 	b->vel += accel * dt;
@@ -710,6 +705,17 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 
 	if ( b->pos.y < FAccel.bound_min.y ) b->pos.y = FAccel.bound_max.y;
 	if ( b->pos.y > FAccel.bound_max.y ) b->pos.y = FAccel.bound_min.y;	
+
+	// [stats only] Compute angular acceleration, does not affect sim
+	// b->orient = quat_from_directionup ( v0, make_float3(0,1,0) );
+	v1 = normalize ( b->vel );
+	q = quat_rotation_fromto ( v0, v1, 1.0 );	
+	b->ang_accel = quat_to_euler ( q );
+
+	// [stats only] Compute angle from neighborhood average	
+	v1 = normalize ( b->ave_vel );
+	q = quat_rotation_fromto ( v0, v1, 1.0 );	
+	b->ang_offaxis = quat_to_euler ( q ) ;
 
 	#ifdef DEBUG_BIRD
 		if (b->id == DEBUG_BIRD) {

@@ -138,6 +138,7 @@
 		float		min_speed, max_speed;
 		float		min_power, max_power;
 		float		fov, fovcos;
+		float		wing_area;
 		float		lift_factor;
 		float		drag_factor;
 		float		safe_radius;

@@ -59,6 +59,7 @@ struct vis_t {
 struct graph_t {
 	int			x;
 	float		y[2048];
+	Vec2F		scal;
 	Vec4F		clr;
 };
 #define GRAPH_BANK		0
@@ -71,7 +72,7 @@ struct graph_t {
 
 #define SAMPLES			16384
 #define PLOT_RESX		2048
-#define PLOT_RESY		1024
+#define PLOT_RESY		800
 
 // FFTW Analysis
 #ifdef USE_FFTW
@@ -113,7 +114,7 @@ public:
 	
 	// rendering
 	void			SelectBird (float x, float y);
-	void			Graph ( int id, float y, Vec4F clr );
+	void			Graph ( int id, float y, Vec4F clr, Vec2F scal );
 	void			VisualizeSelectedBird ();	
 	void			DebugBird ( int id, std::string msg );
 	void			CameraToBird ( int b );
@@ -162,7 +163,7 @@ public:
 	bool			m_draw_sphere;
 	bool			m_draw_grid;
 	bool			m_draw_plot;
-	bool			m_draw_vis;
+	int				m_draw_vis;
 	bool			m_gpu, m_kernels_loaded;
 
 	ofstream outputFile;		// output data file
@@ -224,7 +225,7 @@ Sample obj;
 
 		LoadKernel ( KERNEL_INSERT,					"insertParticles" );
 		LoadKernel ( KERNEL_COUNTING_SORT,	"countingSortFull" );	
-		LoadKernel ( KERNEL_FIND_NBRS,			"findNeighbors" );
+		LoadKernel ( KERNEL_FIND_NBRS,			"findNeighborsTopological" );
 		LoadKernel ( KERNEL_ADVANCE_ORIENT,	"advanceByOrientation" );
 		LoadKernel ( KERNEL_ADVANCE_VECTORS,"advanceByVectors" );
 		LoadKernel ( KERNEL_FPREFIXSUM,			"prefixSum" );
@@ -305,8 +306,8 @@ void Sample::DefaultParams ()
 	m_Params.DT = 0.005;							// timestep (sec), .005 = 5 msec = 200 hz
 	//m_Params.mass =	0.350;						// bird mass (kg) - pigeon
 	m_Params.mass =	0.08;							// bird mass (kg) - starling
-	m_Params.power = 0.3;							// 100% power (in joules)
-	m_Params.min_speed = 7.0;					// min speed (m/s)		// Demsar2014
+	m_Params.power = 0.2373;							// 100% power (in joules)
+	m_Params.min_speed = 5.0;					// min speed (m/s)		// Demsar2014
 	m_Params.max_speed = 18;					// max speed (m/s)		// Demsar2014	
 	//m_Params.min_speed = 1.0;					// min speed (m/s)		// Demsar2014
 	//m_Params.max_speed = 4.0;					// max speed (m/s)		// Demsar2014	
@@ -327,13 +328,14 @@ void Sample::DefaultParams ()
 	m_Params.cohesion_amt =	0.004f;			// bird cohesion amount
 
 	// flight parameters
-	m_Params.lift_factor = 0.0400;			// lift factor
-	m_Params.drag_factor = 0.0070;			// drag factor (L/D ratio 10:1)
+	m_Params.wing_area = 0.0224;
+	m_Params.lift_factor = 0.5714;			// lift factor
+	m_Params.drag_factor = 0.1731;			// drag factor 
 	m_Params.safe_radius = 2.0;					// radius of avoidance (m)
 	m_Params.pitch_decay = 0.95;				// pitch decay (return to level flight)
 	m_Params.pitch_min = -40;						// min pitch (degrees)
 	m_Params.pitch_max = 40;						// max pitch (degrees)	
-	m_Params.reaction_delay = 0.0005f;			// reaction delay
+	m_Params.reaction_delay = 0.0020f;			// reaction delay
 	m_Params.dynamic_stability = 0.6f;			// dyanmic stability factor
 	m_Params.air_density = 1.225;				// air density (kg/m^3)
 	m_Params.gravity = Vec3F(0, -9.8, 0);		// gravity (m/s^2)
@@ -360,7 +362,7 @@ void Sample::DefaultParams ()
 	/* m_Params.align_amt = 0.0f;	
 	m_Params.cohesion_amt =	0.0f;
 	m_Params.avoid_angular_amt = 0.0f;
-	m_Params.border_amt = 0.0f;  */
+	m_Params.border_amt = 0.0f;   */
 
 	// Reynold's Classic model	
 	//m_Params.reynolds_avoidance = 0.15;
@@ -426,9 +428,11 @@ void Sample::Reset (int num, int num_pred )
 		// randomly distribute birds
 		pos = m_rnd.randV3( -100, 100 );
 		pos.y = pos.y * .5f + 50;
+		
 		vel = m_rnd.randV3( -20, 20 );		
 		vel.y = 0;
 		vel *= 7.5 / vel.Length ();
+
 		h = m_rnd.randF(-180, 180);
 		b = AddBird ( pos, vel, Vec3F(0, 0, h), 1 );  
 		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f ); 	
@@ -514,6 +518,7 @@ void Sample::Reset (int num, int num_pred )
 	
 	// clear plots
 	m_vis.clear ();
+	m_graph.clear ();
 	m_plot[0].Fill ( 0,0,0,0 );	
 	m_plot[1].Fill ( 0,0,0,0 );	
 
@@ -1060,9 +1065,12 @@ void Sample::UpdateFlockData ()
 	m_Flock.Pturn = pturn / m_Params.num_birds;	
 	m_Flock.Ptotal = ptotal / m_Params.num_birds;		
 
-	if ( m_frame % 8 == 0 ) {
-		//Graph ( 0, (m_Flock.Pturn - 0.02) * 5000.0, Vec4F(1,0,0,1) );
-		Graph ( 0, (m_Flock.Pturn - 0.00030) * 200000.0, Vec4F(1,0,0,1) );
+	if ( m_frame > m_start_frame ) {
+		if ( m_frame % 8 == 0 ) {
+			float xscal = 1.0 / (m_Params.DT * 8.0f);
+			float yscal = (m_method==0) ? 4e-4 : 5e-2;
+			Graph ( 0, m_Flock.Pturn, Vec4F(0,0,0,1), Vec2F(xscal, yscal) );
+		}
 	}
 
 	if ( m_gpu ) {
@@ -1184,14 +1192,15 @@ void Sample::OutputFFTW ( int frame )
 	xf = (xi-N/2)/xdiv;
 	
 	if ( xi > N ) {
-		float energy = 0;		
+		float energy = 0.0;		
+		float emin = 0;
 		
 		// plot freq for current time		
 		for (int f=1; f < N/2; f++) {					
 			v = fmax(0, fmin( 1, 0.01f * 10. * log(fmag[f] + 1e-6) / log(10) ));		// dB						
 			v = v*v / 5.f;
-			if (f < N/8) {
-				energy += v;
+			if (f < N/4) {
+				energy += v;				
 			}
 			c = m_plot[0].GetPixel ( xf, f );
 			c += Vec4F(v,v,v,1);
@@ -1199,13 +1208,13 @@ void Sample::OutputFFTW ( int frame )
 		}		
 		
 		// plot and record total spectral energy
-		c = Vec4F(1,0,0,1);			
-		energy *= 10000.0 / (N/8);		
-		m_plot[0].SetPixel ( xf, PLOT_RESY - energy, c );		
-		m_fftw_energy [ xf ] = energy;
-
-		// printf ( "%f\n", energy );
+		c = Vec4F(0,0,0,1);			
+		energy = energy / (N/256.0f) - 1.2f;
+		m_fftw_energy [ xf ] = energy;			
+		m_plot[0].SetPixel ( xf, PLOT_RESY - energy*400, c );		
+		printf ( "%f, %f\n", m_fftw_energy[xf], energy );
 		
+
 		// 200 hz = 1 sec		
 		if ( xi % 200 == 0 ) {
 			
@@ -1222,10 +1231,10 @@ void Sample::OutputFFTW ( int frame )
 			int peak_cnt = 0;
 			float peak_ave = 0;
 
-			// collection energy func
+			// collect energy func
 			e = m_fftw_energy + js;			
 			for (int j = js+3; j < xf; j++) {
-				pnts.push_back ( Vec2F(j, e[3]) );
+				pnts.push_back ( Vec2F( j, e[3] ) );
 				e++;
 			}
 			// fit a line to energy
@@ -1233,18 +1242,18 @@ void Sample::OutputFFTW ( int frame )
 			if ( fit( A, B, C, pnts ) ) {
 				m = (-A/B);
 				b = (-C/B);
-				m_lines.push_back ( Vec4F(0, PLOT_RESY-b, xf, PLOT_RESY-(m*xf+b) ) );
+				m_lines.push_back ( Vec4F(0, PLOT_RESY-b*400, xf, PLOT_RESY-(m*xf+b)*400 ) );
 			}
 
 			// count peaks in energy			
 			e = m_fftw_energy + js;			
 			for (int j = js+3; j < xf; j++) {
-				pnts.push_back ( Vec2F(j, e[3]) );
-				if ( e[0] < e[2] && e[2] < e[3] && e[3] > e[4] && e[4] > e[6] && (e[3]-e[0]) > 2.0 ) {
-					// compute diff to line
-					diff = fabs( e[3] - (m*j+b) );
-					sprintf ( txt, "%4.1f", diff );
-					m_vis.push_back ( vis_t( Vec3F( j, PLOT_RESY-e[3], 0), 2.0f, Vec4F(1,1,0,1), txt ) );
+				pnts.push_back ( Vec2F(j, e[3]) );				
+				diff = fabs( e[3] - (m*j+b) );
+				if ( e[0] < e[2] && e[2] < e[3] && e[3] > e[4] && e[4] > e[6] && diff > 0.01 ) { 					
+					// compute diff to line					
+					sprintf ( txt, "%4.1f", diff*100.0f);
+					m_vis.push_back ( vis_t( Vec3F( j, PLOT_RESY-e[3]*400, 0), 2.0f, Vec4F(0,0,0,1), txt ) );
 					peak_cnt++;
 					peak_ave += diff;
 				}
@@ -1257,13 +1266,13 @@ void Sample::OutputFFTW ( int frame )
 			}
 			// average accel
 			//sprintf ( txt, "%4.2f", ave );
-			//m_vis.push_back ( vis_t( Vec3F( x, (PLOT_RESY/2) + 16 + x/2, 0), 1, Vec4F(0,0,1,1), txt ) );
+			//m_vis.push_back ( vis_t( Vec3F( x, (PLOT_RESY/2) + 16 + x/2, 0), 1, Vec4F(0,0,0,1), txt ) );
 		}
 	}
 
 	// plot samples
 	s = m_samples + (N/2)*SAMPLES + x;
-	for (y = N/2; y < PLOT_RESY/2; y++) {			
+	for (y = N/2; y < N; y++) {			
 		v = (*s) * 0.05f / 5.f;
 		c = m_plot[0].GetPixel ( x, y);		
 		c += Vec4F(v, v, v, 1); 
@@ -1565,16 +1574,16 @@ void Sample::AdvanceByOrientation ()
 			aoa = acos( fwd.Dot( vaxis ) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  			if (isnan(aoa)) aoa = 1;
 			// CL = sin(aoa * 0.2) = coeff of lift, approximate CL curve with sin
-			L = (sin( aoa * 0.1)+0.5) * dynamic_pressure * m_Params.lift_factor * 1.0;		// lift equation. L = CL (1/2 p v^2) A
+			L = (sin( aoa * 0.1)+0.5) * dynamic_pressure * m_Params.lift_factor *m_Params.wing_area;		// lift equation. L = CL (1/2 p v^2) A			
 			lift = up * L;
 			force += lift;
 
 			// Drag force	
-			drag = vaxis * dynamic_pressure * m_Params.drag_factor  * -1.0f;			// drag equation. D = Cd (1/2 p v^2) A
+			drag = vaxis * dynamic_pressure * -m_Params.drag_factor  * m_Params.wing_area;			// drag equation. D = Cd (1/2 p v^2) A
 			force += drag; 
 
 			// Thrust force
-			thrust = fwd * b->power;
+			thrust = fwd * b->power * m_Params.power;
 			force += thrust;
 	
 			// Integrate position		
@@ -1986,7 +1995,7 @@ void Sample::SelectBird (float x, float y)
 	}
 }
 
-void Sample::Graph ( int id, float y, Vec4F clr )
+void Sample::Graph ( int id, float y, Vec4F clr, Vec2F scal)
 {
 	if ( id >= m_graph.size() ) {
 		while (id >= m_graph.size()) {			
@@ -1994,6 +2003,7 @@ void Sample::Graph ( int id, float y, Vec4F clr )
 			ng.x = 0;
 			memset ( &ng.y[0], 0, 2048 * sizeof(float) );
 			ng.clr = clr;
+			ng.scal = scal;			
 			m_graph.push_back ( ng );
 		}
 	}
@@ -2044,9 +2054,9 @@ void Sample::VisualizeSelectedBird ()
 	sprintf ( msg, "Pturn:   %4.6f watts", b->Pturn );			drawText ( Vec2F(10, 190), msg, tc );
 	// Pfwd = Pprof + Ppara   (Pfwd = profile + parasitic power, and Pdrag is already included)
 	float P = b->Plift + b->Pfwd + b->Pturn;
-	sprintf ( msg, "Ptotal:  %4.3f watts", P );							drawText ( Vec2F(10, 210), msg, tc );
-	sprintf ( msg, "speed:   %4.3f m/s", b->speed );				drawText ( Vec2F(10, 230), msg, tc );
-	sprintf ( msg, "thrust:  %4.3f", b->power );						drawText ( Vec2F(10, 250), msg, tc );		
+	sprintf ( msg, "Ptotal:  %4.3f watts", P );								drawText ( Vec2F(10, 210), msg, tc );
+	sprintf ( msg, "speed:   %4.3f m/s", b->speed );					drawText ( Vec2F(10, 230), msg, tc );
+	sprintf ( msg, "power:   %4.3f joules", b->power * m_Params.power ); drawText ( Vec2F(10, 250), msg, tc );		
 		
 	sprintf ( msg, "ave. lift:  %4.3f watts / bird", m_Flock.Plift );		drawText ( Vec2F(10, 280), msg, tc );
 	sprintf ( msg, "ave. drag:  %4.3f watts / bird", m_Flock.Pdrag );		drawText ( Vec2F(10, 300), msg, tc );
@@ -2054,16 +2064,6 @@ void Sample::VisualizeSelectedBird ()
 	sprintf ( msg, "ave. turn:  %4.6f watts / bird", m_Flock.Pturn );		drawText ( Vec2F(10, 340), msg, tc );
 	sprintf ( msg, "ave. total: %4.3f watts / bird", m_Flock.Ptotal );	drawText ( Vec2F(10, 360), msg, tc );
 	sprintf ( msg, "ave. speed: %4.6f m/s", m_Flock.speed );						drawText ( Vec2F(10, 380), msg, tc );
-
-	// graphs
-	/* Vec3F angs;
-	b->orient.toEuler ( angs );				
-	if (++m_graph[0].x >= 2048) m_graph[0].x = 0;
-	int x = m_graph[0].x;
-	Graph ( GRAPH_BANK,		x, angs.x, Vec4F(1,0,0,1) );
-	Graph ( GRAPH_PITCH,	x, angs.y, Vec4F(0,1,0,1) );
-	Graph ( GRAPH_VEL,		x, b->vel.Length(), Vec4F(0,0,1,1) );
-	*/
 
 	// visualize bird (green)
 	m_vis.push_back ( vis_t( b->pos, 1.1f, Vec4F(0,1,0,1), "" ) );
@@ -2141,7 +2141,7 @@ void Sample::Run ()
 	FindNeighbors ();
 
 	//--- Advance birds with behaviors & flight model
-	if ( m_method==0) {
+	if ( m_method==0 ) {
 		AdvanceByOrientation ();	
 	} else {
 		AdvanceByVectors ();
@@ -2155,8 +2155,8 @@ void Sample::Run ()
 
 	//--- Outputs 
 	// OutputPointCloudFiles ( m_frame );  
-	//OutputPlot ( 0, m_frame );
-	 //OutputFFTW ( m_frame );
+	// OutputPlot ( 0, m_frame );
+	// OutputFFTW ( m_frame );
 
 	#ifdef DEBUG_BIRD
 		DebugBird ( 7, "Post-Advance" );
@@ -2254,7 +2254,7 @@ bool Sample::init ()
 	m_cockpit_view = false;
 	m_draw_sphere = false;
 	m_draw_grid = false;
-	m_draw_vis = true;
+	m_draw_vis = 0;
 	m_cam_mode = 0;	
 	m_method = 0; 	
 	m_rnd.seed (12);
@@ -2266,11 +2266,11 @@ bool Sample::init ()
 	m_frame = 0;
 
 	m_start_frame = 1000;			// 5 sec, settling time
-	m_end_frame = 5000;				// 20 sec, experiment time
+	m_end_frame = 9000;				// 40 sec, experiment time = 40/dt + start = 40/.005 + 1000 = 9000
 
 	// build FFTW arrays 
 	#ifdef USE_FFTW		
-		m_fftw_N = 128;
+		m_fftw_N = 512;
 		m_fftw_in = (double*) malloc ( sizeof(double) * m_fftw_N );
 		m_fftw_out = (fftw_complex*) fftw_malloc ( sizeof(fftw_complex) * m_fftw_N);
 		m_fftw_plan = fftw_plan_dft_r2c_1d ( m_fftw_N, m_fftw_in, m_fftw_out, FFTW_ESTIMATE );	
@@ -2333,14 +2333,20 @@ void Sample::drawBackground ()
 {
 	int w = getWidth(), h = getHeight();
 	
-	if ( m_draw_vis ) {
-		// black background for vis
-		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(.4,.4,.4,1) );
-	} else {
-		// realistic sky
-		//drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
+	switch ( m_draw_vis ) {
+	case 0:
+		// realistic sky		
 		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
-	}
+		break;
+	case 1:
+		// gray background for vis
+		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(.3,.3,.3, 1) );
+		break;	
+	case 2:
+		// white background for publications
+		drawFill ( Vec2F(0,0), Vec2F(w,h), Vec4F(1,1,1,1) );
+		break;
+	};
 }
 
 void Sample::display ()
@@ -2467,8 +2473,12 @@ void Sample::display ()
 	
 	Vec4F tc (1,1,1,1);	
 
+	float xscal, yscal;
+
 	start2D ( w, h );			// this 2D draw is overlayed on top
 		
+		clr = Vec4F(0,0,0,1);			
+
 		// Visualize selected bird
 		VisualizeSelectedBird ();
 
@@ -2476,37 +2486,58 @@ void Sample::display ()
 
 		// Spectrum analysis 
 		if ( m_draw_plot ) {
+			
 			// FFT plot
 		  drawImg ( &m_plot[0], Vec2F(0,0), Vec2F(PLOT_RESX, PLOT_RESY), Vec4F(1,1,1,1) );
 
+			// FFT fit line
+			for (int k=0; k < m_lines.size(); k++) {
+				drawLine ( Vec2F(m_lines[k].x, m_lines[k].y), Vec2F(m_lines[k].z, m_lines[k].w), Vec4F(0,0,0,0.3) );
+			}
 			// FFT energy peaks			
 		  for (int k=0; k < m_vis.size(); k++) {
 				drawCircle ( m_vis[k].pos, m_vis[k].radius, m_vis[k].clr );				
 				drawText ( m_vis[k].pos + Vec3F(0,-16,0), m_vis[k].txt, m_vis[k].clr );
 			}			
-
-			for (int k=0; k < m_lines.size(); k++) {
-				drawLine ( Vec2F(m_lines[k].x, m_lines[k].y), Vec2F(m_lines[k].z, m_lines[k].w), Vec4F(1,1,1,1) );
-			}
-		}
+		}				
 
 		// Energy scatter plot		
-		/* clr = Vec4F(0,0,1,1);
+		xscal = m_Params.max_speed;
+		//yscal = (m_method==0) ? 1e-4 : 5e-2;
+	  yscal = 30;
+		drawRect ( Vec2F( (m_Params.min_speed/xscal)*1000, 600 - 200), Vec2F( (m_Params.max_speed/xscal)*1000, 600), clr );
+		for (float v=m_Params.min_speed; v < m_Params.max_speed; v+=1) {		// meters/sec
+			drawLine ( Vec2F( (v/xscal)*1000, 600-10), Vec2F( (v/xscal)*1000, 600), clr );		// x-axis ticks
+		}
 		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
-			b = (Bird*) m_Birds.GetElem(0, n);
-			//clr = (b->Pfwd > 0.0001 ) ? Vec4F(1,0,0,1) : Vec4F(0,0,1,1) ;
-			drawCircle ( Vec2F(b->speed*50, 1000 - b->Ptotal*10), 1.0, clr);
-		} */
+			b = (Bird*) m_Birds.GetElem(0, n);			
+			//drawCircle ( Vec2F( (b->speed/xscal)*1000, 600 - (b->Pturn / yscal)*200 ), 1.0, clr);
+			drawCircle ( Vec2F( (b->speed/xscal)*1000, 600 - (b->Ptotal / yscal)*200 ), 1.0, clr);
+		} 
 
-
-		// Draw any graphs
+		// Graph 
 		if ( m_graph.size() > 0 ) {
-			Vec2F a,b;
-			drawRect ( Vec2F(0, 20), Vec2F(getWidth(), 420.f), Vec4F(.5,.5,.5,1 ));			
+			Vec2F a,b;			
+			// f = t / dt, x = f / 20 = t/(dt*20)
+			float tmax = 40.0;									// graph max (seconds)
+			
 			for (int k=0; k < m_graph.size(); k++) {
-				b = Vec3F( 0, 420 - m_graph[k].y[0], 0);
+
+				xscal = m_graph[k].scal.x;
+				yscal = m_graph[k].scal.y;
+				// tick marks
+				drawRect ( Vec2F(0, 1200), Vec2F(0+tmax*xscal, 800), clr );
+				for (float v = 0; v < tmax; v++) {		// secs
+					drawLine ( Vec2F(v*xscal, 1200-10), Vec2F(0+v*xscal, 1200), clr );
+				}
+				for (float v = 0; v < yscal; v+= yscal/10.0f) {		
+					drawLine ( Vec2F(0, 1200-(v/yscal)*400), Vec2F(0+tmax*xscal, 1200-(v/yscal)*400), Vec4F(0,0,0, 0.5) );
+				}			
+				// plot
+				b = Vec3F( 0, 1200 - (m_graph[k].y[0] / yscal)*400, 0);
+				//printf ( "%f\n", m_graph[k].y[100] );
 				for (int x=0; x < 2084; x++) {
-					a = Vec3F( x, 420 - m_graph[k].y[x], 0);
+					a = Vec3F( x, 1200 - (m_graph[k].y[x] / yscal)*400, 0);
 					drawLine ( a, b, m_graph[k].clr );
 					b = a;
 				}
@@ -2514,9 +2545,9 @@ void Sample::display ()
 		}
 
 		// Current time
-		/* sprintf ( msg, "t=%4.3f sec", m_time );	
+		sprintf ( msg, "t = %4.3f sec", m_time );	
 		setTextSz ( 24, 0 );						// set text height
-		drawText ( Vec2F(10, 10), msg, tc );					 */
+		drawText ( Vec2F(getWidth()-400, 10), msg, tc );	
 
 	end2D(); 
 
@@ -2605,10 +2636,11 @@ void Sample::keyboard(int keycode, AppEnum action, int mods, int x, int y)
 	switch ( keycode ) {
 	case 'm': 
 		m_method = 1-m_method;
+		m_Params.min_speed = (m_method==0) ? 5 : 10;
 		Reset( m_Params.num_birds, m_Params.num_predators);
 		break;
 	case 'v': 
-		m_draw_vis = !m_draw_vis;	
+		if (++m_draw_vis > 2 ) m_draw_vis = 0;
 		break;
 	case 's': m_draw_sphere = !m_draw_sphere; break;
 	case 'g': m_draw_grid = !m_draw_grid; break;
@@ -2644,7 +2676,7 @@ void Sample::reshape (int w, int h)
 
 void Sample::startup ()
 {
-	int w = 2048, h = 1920;
+	int w = 2048, h = 1250;
 	appStart ( "Flock v2 (c) Rama Karl 2023, MIT license", "Flock v2", w, h, 4, 2, 16, false );	
 }
 
