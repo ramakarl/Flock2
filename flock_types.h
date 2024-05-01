@@ -67,7 +67,7 @@
 		f4			clr;
 
 		f3			pos, vel, accel, target;
-		f3			ave_pos, ave_vel;
+		f3			ave_pos, ave_vel, ave_del;
 		f3			ang_accel, ang_offaxis;
 		f3			lift, drag, thrust, gravity;
 		
@@ -142,8 +142,8 @@
 		float		lift_factor;
 		float		drag_factor;
 		float		safe_radius;
-		float		border_cnt;
-		float		border_amt;
+		float		boundary_cnt;
+		float		boundary_amt;
 		float		avoid_angular_amt;
 		float		avoid_power_amt;
 		float		avoid_power_ctr;
@@ -151,7 +151,7 @@
 		float		cohesion_amt;
 		float		pitch_decay;
 		float		pitch_min, pitch_max;
-		float		reaction_delay;
+		float		reaction_speed;
 		float		dynamic_stability;
 		float		air_density;		
 		float		front_area;

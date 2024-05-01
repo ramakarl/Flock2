@@ -141,6 +141,7 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 	bi->r_nbrs = 0;
 	bi->ave_pos = make_float3(0,0,0);
 	bi->ave_vel = make_float3(0,0,0);
+	bi->ave_del = make_float3(0,0,0);
 	diri = normalize ( bi->vel );
 
 	nearest = rd2;
@@ -180,6 +181,7 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 								sort_j_nbr[m+1] = sort_j_nbr[m];
 							}
 						}
+						
 						sort_d_nbr[k] = dsq;
 						sort_j_nbr[k] = j;
 						
@@ -200,6 +202,7 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 		bj = ((Bird*) FBirds.data(FBIRD)) + sort_j_nbr[k];
 		bi->ave_pos += bj->pos;
 		bi->ave_vel += bj->vel;		
+		bi->ave_del += normalize (bj->pos - bi->pos) ;	
 	}
 	bi->near_j = sort_j_nbr[0];
 
@@ -207,6 +210,7 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 	if (sort_num > 0 ) {
 		bi->ave_pos *= (1.0f / sort_num );
 		bi->ave_vel *= (1.0f / sort_num );
+		bi->ave_del *= (1.0f / sort_num );
 	}
 
 }
@@ -229,8 +233,8 @@ extern "C" __global__ void findNeighbors ( int pnum)
 	const float d2 = (FAccel.sim_scale * FAccel.sim_scale);
 	const float rd2 = (FAccel.psmoothradius * FAccel.psmoothradius) / d2;	
 	
-	float birdang;
-	float fov = cos ( 120 * RADtoDEG );
+	float birdang;	
+	float del_sum = 0;
 
 	// current bird
 	bi = ((Bird*) FBirds.data(FBIRD)) + i;	
@@ -239,6 +243,7 @@ extern "C" __global__ void findNeighbors ( int pnum)
 	bi->t_nbrs = 0;
 	bi->ave_pos = make_float3(0,0,0);
 	bi->ave_vel = make_float3(0,0,0);
+	bi->ave_del = make_float3(0,0,0);
 	diri = normalize ( bi->vel );
 
 	nearest = rd2;
@@ -273,6 +278,7 @@ extern "C" __global__ void findNeighbors ( int pnum)
 						bi->near_j = j;
 					}
 					// average neighbors
+					bi->ave_del += normalize (bj->pos - bi->pos) ;					
 					bi->ave_pos += bj->pos;
 					bi->ave_vel += bj->vel;
 					bi->r_nbrs++;
@@ -282,6 +288,7 @@ extern "C" __global__ void findNeighbors ( int pnum)
 	}
 
 	if (bi->r_nbrs > 0 ) {
+		bi->ave_del *= (1.0f / bi->r_nbrs);
 		bi->ave_pos *= (1.0f / bi->r_nbrs);
 		bi->ave_vel *= (1.0f / bi->r_nbrs);
 	}
@@ -391,15 +398,15 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 
 		// Rule 4. Boundary Term
 		// (Hoetzlein, new boundary term for periphery avoidance, 2023)	
-		float d = b->r_nbrs / FParams.border_cnt;
+		float d = b->r_nbrs / FParams.boundary_cnt;
 		if ( d < 1.0 ) { 
 			b->clr = make_float4(1, .5, 0, 1);	
 			dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
 			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 			pitch = asin( dirj.y )*RADtoDEG;
-			d = (FParams.border_cnt - b->r_nbrs ) / FParams.border_cnt;
-			b->target.z +=   yaw * FParams.border_amt * d;
-			b->target.y += pitch * FParams.border_amt * d;
+			d = (FParams.boundary_cnt - b->r_nbrs ) / FParams.boundary_cnt;
+			b->target.z +=   yaw * FParams.boundary_amt * d;
+			b->target.y += pitch * FParams.boundary_amt * d;
 		}
 
 		// Rule 5. Bird-Predators avoidance
@@ -470,14 +477,15 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 
 	// Roll - Control input
 	// - orient the body by roll
-	ctrlq = quat_from_angleaxis ( b->ang_accel.x * FParams.reaction_delay, fwd );
+	float rx = FParams.DT*1000.0f / FParams.reaction_speed;
+	ctrlq = quat_from_angleaxis ( b->ang_accel.x * rx, fwd );
 	b->orient = quat_normalize ( quat_mult ( b->orient, ctrlq ) );
 
 	// Pitch & Yaw - Control inputs
 	// - apply 'torque' by rotating the velocity vector based on pitch & yaw inputs						
-	ctrlq = quat_from_angleaxis ( b->ang_accel.z * FParams.reaction_delay, up * -1.f );
+	ctrlq = quat_from_angleaxis ( b->ang_accel.z * rx, up * -1.f );
 	vaxis = normalize ( quat_mult ( vaxis, ctrlq ) ); 
-	ctrlq = quat_from_angleaxis ( b->ang_accel.y * FParams.reaction_delay, right );
+	ctrlq = quat_from_angleaxis ( b->ang_accel.y * rx, right );
 	vaxis = normalize ( quat_mult ( vaxis, ctrlq ) );
 
 	// Adjust velocity vector
@@ -611,13 +619,16 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	b->speed = length( b->vel );
 	
 	if ( b->r_nbrs > 0 ) {
+		
+		bj = ((Bird*) FBirds.data(FBIRD)) + b->near_j;
 
 		// Rule #1. Avoidance	(Reynolds position-based)		
-		if ( b->near_j != -1 ) {		
-			bj = ((Bird*) FBirds.data(FBIRD)) + b->near_j;
+		dirj = b->ave_del;
+		force -= dirj * FParams.reynolds_avoidance;
+		/*if ( b->near_j != -1 ) {				
 			dirj = bj->pos - b->pos;
 			force -= dirj * FParams.reynolds_avoidance;
-		}
+		}*/
 	
 		// Rule #2. Alignment	(Reynolds position-based)			
 		dirj = b->ave_vel - b->vel;
@@ -627,21 +638,6 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 		dirj = b->ave_pos - b->pos;
 		force += dirj * FParams.reynolds_cohesion;
 	}
-	//force.y = 0;
-
-	// Ground avoidance (Y-)
-	/*float L = b->pos.y - FAccel.bound_min.y;
-	if ( L < FParams.bound_soften ) {			
-		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		force.y += L * FParams.avoid_ground_amt * 5;
-	} 
-
-	// Ceiling avoidance (Y+)
-	L = FAccel.bound_max.y - b->pos.y;
-	if ( L < FParams.bound_soften ) {	
-		L = (FParams.bound_soften - L) / FParams.bound_soften;
-		force.y -= L * FParams.avoid_ceil_amt * 5;
-	} */
 	
 	// Gravity force
 	b->gravity = FParams.gravity * FParams.mass;		// Fgrav = mg
@@ -682,8 +678,8 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	b->Ptotal = b->Plift + b->Pdrag + b->Pfwd + b->Pturn;
 
 	// [stats only] visualize turn energy	
-	float cl = min( b->Pturn * 100.0f, 1.0);
-	b->clr = make_float4( 1-cl, cl, 0, 1);	
+	// float cl = min( b->Pturn * 100.0f, 1.0);
+	// b->clr = make_float4( 1-cl, cl, 0, 1);	
 
 	// Integrate position and velocity 
 	b->vel += accel * dt;
@@ -693,9 +689,14 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	b->speed = length( b->vel );	
 	if ( b->speed < FParams.min_speed) b->speed = FParams.min_speed;
 	if ( b->speed > FParams.max_speed) b->speed = FParams.max_speed;
-	b->vel = b->vel * b->speed / length(b->vel);
+	b->vel = normalize(b->vel) * b->speed;
 
-	b->vel.y *= 0.9999;
+
+
+	//b->vel.y *= 0.9999;
+	
+	// Orient the bird (for rendering)
+	b->orient = quat_from_directionup ( v0, make_float3(0,1,0) );
 
 	// Wrap boundaries (X/Z)
 	if ( b->pos.x < FAccel.bound_min.x ) b->pos.x = FAccel.bound_max.x;
@@ -707,7 +708,7 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	if ( b->pos.y > FAccel.bound_max.y ) b->pos.y = FAccel.bound_min.y;	
 
 	// [stats only] Compute angular acceleration, does not affect sim
-	// b->orient = quat_from_directionup ( v0, make_float3(0,1,0) );
+	
 	v1 = normalize ( b->vel );
 	q = quat_rotation_fromto ( v0, v1, 1.0 );	
 	b->ang_accel = quat_to_euler ( q );
