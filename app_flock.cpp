@@ -326,10 +326,10 @@ void Sample::DefaultParams ()
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
 	m_Params.steps = 2;
-	m_Params.DT = 0.005;							// timestep (sec), .005 = 5 msec = 200 hz
+	m_Params.DT = 0.010;							// timestep (sec), .005 = 5 msec = 200 hz
 	
 	m_Params.mass =	0.08;							// bird mass (kg) - starling
-	m_Params.power = 0.2873;							// 100% power (in joules)
+	m_Params.power = 0.3873;							// 100% power (in joules)
 	m_Params.min_speed = 5;						// min speed (m/s)		// Demsar2014
 	m_Params.max_speed = 18;					// max speed (m/s)		// Demsar2014		
 	m_Params.min_power = -20;					// min power (N)
@@ -339,7 +339,7 @@ void Sample::DefaultParams ()
 	
 	// social factors
 	m_Params.boundary_cnt = 160;						// border width (# birds)	
-	m_Params.boundary_amt = 0.40f;				// border steering amount (keep <0.1)	
+	m_Params.boundary_amt = 0.60f;				// border steering amount (keep <0.1)	
 	
 	//-- disable border
 	//	m_Params.border_cnt = 0;
@@ -356,11 +356,11 @@ void Sample::DefaultParams ()
 	m_Params.lift_factor = 0.5714;			// lift factor
 	m_Params.drag_factor = 0.1731;			// drag factor 
 	m_Params.safe_radius = 2.0;					// radius of avoidance (m)
-	m_Params.pitch_decay = 0.99;				// pitch decay (return to level flight)
+	m_Params.pitch_decay = 0.95;				// pitch decay (return to level flight)
 	m_Params.pitch_min = -40;						// min pitch (degrees)
 	m_Params.pitch_max = 40;						// max pitch (degrees)	
-	m_Params.reaction_speed = 2200;			// reaction speed (millisec)
-	m_Params.dynamic_stability = 0.9f;	// dyanmic stability factor
+	m_Params.reaction_speed = 4500;			// reaction speed (millisec)
+	m_Params.dynamic_stability = 0.5f;	// dyanmic stability factor
 	m_Params.air_density = 1.225;				// air density (kg/m^3)
 	m_Params.gravity = Vec3F(0, -9.8, 0);		// gravity (m/s^2)
 	m_Params.front_area = 0.1f;					// section area of bird into wind
@@ -2583,7 +2583,7 @@ void Sample::display ()
 			// visualization color
 			clr = b->clr;
 			if ( b->clr.w==0 ) {
-				float a = fmin(b->ang_accel.Length() / 6, 1);
+				float a = fmin(b->ang_accel.Length() / 48, 1);
 				clr = Vec4F( 0, a, 0, 1 );
 			}
 			if ( m_draw_vis==2) {
