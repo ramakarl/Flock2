@@ -473,8 +473,7 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	b->target.y *= FParams.pitch_decay; 
 	if ( b->target.y < FParams.pitch_min ) b->target.y = FParams.pitch_min;
 	if ( b->target.y > FParams.pitch_max ) b->target.y = FParams.pitch_max;	
-	
-	// if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
+	if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
 
 	// Compute angular acceleration
 	// - as difference between current direction and desired direction
@@ -514,6 +513,7 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	// aoa = acos( dot(fwd, vaxis) )*RADtoDEG + 1;		// angle-of-attack = angle between velocity and body forward		
  	// if (isnan(aoa)) aoa = 1;	
 	// L = (sin( aoa * 0.1)+0.5) * dynamic_pressure * FParams.lift_factor * FParams.wing_area;		// lift equation. L = CL (1/2 p v^2) A
+	
 	//-- fixed CL
 	L = dynamic_pressure * FParams.lift_factor * FParams.wing_area;		// lift equation. L = CL (1/2 p v^2) A
 
