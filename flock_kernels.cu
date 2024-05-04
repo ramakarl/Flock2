@@ -113,7 +113,7 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 	if ( i >= pnum ) return;
 
 	// Get search cell	
-	uint gc = FBirds.bufI(FGCELL)[ i ];
+	uint gc = FBirds.bufUI(FGCELL)[ i ];
 	if ( gc == GRID_UNDEF ) return;						// particle out-of-range
 	gc -= (1*FAccel.gridRes.z + 1)*FAccel.gridRes.x + 1;
 
@@ -157,14 +157,15 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 			bj = ((Bird*) FBirds.data(FBIRD)) + j;
 
 			// check for neighbor
-			dist = ( bi->pos - bj->pos );		
+			dist = ( bj->pos - bi->pos );		
 			dsq = (dist.x*dist.x + dist.y*dist.y + dist.z*dist.z);
 
 			if ( dsq < rd2 ) {
 				// neighbor is within check radius..
 
 				// confirm bird is within forward field-of-view
-				dist = normalize( bj->pos - bi->pos );
+				dsq = sqrt(dsq);
+				dist /= dsq;
 				birdang = dot ( diri, dist );				
 				if (birdang > FParams.fovcos ) {					
 					
@@ -259,26 +260,27 @@ extern "C" __global__ void findNeighbors ( int pnum)
 			bj = ((Bird*) FBirds.data(FBIRD)) + j;
 
 			// check for neighbor
-			dist = ( bi->pos - bj->pos );		
+			dist = ( bj->pos - bi->pos );		
 			dsq = (dist.x*dist.x + dist.y*dist.y + dist.z*dist.z);
 
 			if ( dsq < rd2 ) {
 				// neighbor is within check radius..
 
 				// confirm bird is within forward field-of-view
-				dist = normalize( bj->pos - bi->pos );
+				dsq = sqrt( dsq );
+				dist /= dsq;
 				birdang = dot ( diri, dist );
 				
 				if (birdang > FParams.fovcos ) {
 
 					// find nearest
-					dsq = sqrt( dsq );			
+					
 					if ( dsq < nearest ) {
 						nearest = dsq;
 						bi->near_j = j;
 					}
 					// average neighbors
-					bi->ave_del += normalize (bj->pos - bi->pos) ;					
+					bi->ave_del += dist;
 					bi->ave_pos += bj->pos;
 					bi->ave_vel += bj->vel;
 					bi->r_nbrs++;
@@ -318,6 +320,9 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	uint i = __mul24(blockIdx.x, blockDim.x) + threadIdx.x;	// particle index				
 	if ( i >= numPnts ) return;
 
+	uint gc = FBirds.bufUI(FGCELL)[ i ];
+	if ( gc == GRID_UNDEF ) return;						// particle out-of-range
+
 	// Get current bird
 	Bird* b = ((Bird*) FBirds.data(FBIRD)) + i;
 	Bird* bj;
@@ -327,6 +332,8 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	float3 fwd, up, right, vaxis, angs;
 	quat4 ctrlq;
 	float airflow, aoa, L, pitch, yaw;
+
+	
 
 	#ifdef DEBUG_BIRD
 		if (b->id == DEBUG_BIRD) {		
@@ -343,7 +350,7 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	
 	ctrlq = quat_inverse ( b->orient );
 
-  float3 centroid = make_float3(0,50,0);
+  float3 center = make_float3(0,50,0);
 
 	if ( b->r_nbrs > 0 ) {
 
@@ -357,21 +364,20 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 			dirj = bj->pos - b->pos;
 			dist = length( dirj );
 
-			if ( dist < FParams.safe_radius ) {
+			//if ( dist < FParams.safe_radius ) {
 
 				// Angular avoidance
 				dirj = quat_mult( (dirj/dist), ctrlq );
 				yaw = atan2( dirj.z, dirj.x) * RADtoDEG;
 				pitch = asin( dirj.y ) * RADtoDEG;
-				dist = fmax( 1.0f, fmin( dist*dist, 100.0f ));				
+				dist = fmax( 1.0f, dist * dist );
 				b->target.z -= yaw *	 FParams.avoid_angular_amt / dist;
-				b->target.y -= pitch * FParams.avoid_angular_amt / dist;
-			}
+				b->target.y -= pitch * FParams.avoid_angular_amt / dist;									
+			//}			
 
 			// Power adjust
 			L = length(b->vel - bj->vel) * FParams.avoid_power_amt;			
-			b->power = FParams.avoid_power_ctr - L * L;
-
+			b->power = FParams.power - L * L;
 		}
 
 		if (b->power < FParams.min_power) b->power = FParams.min_power;
@@ -398,20 +404,20 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 
 		// Rule 4. Boundary Term
 		// (Hoetzlein, new boundary term for periphery avoidance, 2023)	
-		float d = b->r_nbrs / FParams.boundary_cnt;
-		if ( d < 1.0 ) { 
+		if ( FParams.boundary_cnt > 0 && b->r_nbrs <  FParams.boundary_cnt ) { 
 			b->clr = make_float4(1, .5, 0, 1);	
-			dirj = quat_mult ( normalize ( centroid - b->pos ), ctrlq );
+			//dirj = quat_mult ( normalize ( FFlock.centroid - b->pos ), ctrlq );
+			dirj = quat_mult ( normalize ( center - b->pos ), ctrlq );
 			yaw = atan2( dirj.z, dirj.x )*RADtoDEG;
 			pitch = asin( dirj.y )*RADtoDEG;
-			d = (FParams.boundary_cnt - b->r_nbrs ) / FParams.boundary_cnt;
+			float d = (FParams.boundary_cnt - b->r_nbrs ) / FParams.boundary_cnt;
 			b->target.z +=   yaw * FParams.boundary_amt * d;
-			b->target.y += pitch * FParams.boundary_amt * d;
+			b->target.y += pitch * FParams.boundary_amt * d;		
 		}
 
 		// Rule 5. Bird-Predators avoidance
 		// (from Noortje Hagelaars, based on CPU version, 2024)
-		Predator* p;
+		/* Predator* p;
 		for (int m = 0; m < FParams.num_predators; m++) {
 
 			p = (Predator*) FPredators.data(FPREDATOR) + m;			
@@ -428,7 +434,7 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 				b->target.y -= pitch * FParams.avoid_pred_angular_amt; // / predatorDist;
 				b->clr = make_float4(1, 0, 1, 1);				
 			}
-		}		 
+		}	 */ 
 	}	
 
 	//-------------- FLIGHT MODEL
@@ -449,12 +455,12 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 		//b->speed = FParams.min_speed;
 		//b->thrust += vaxis * (FParams.min_speed - b->speed) * FParams.mass / dt;
 		L = FParams.min_speed / b->speed;
-		b->power = L * L;
+		b->power = L; // * L;
 	} else if ( b->speed > FParams.max_speed) {
 		//b->speed = FParams.max_speed;
 		//b->thrust += vaxis * (FParams.max_speed - b->speed) * FParams.mass / dt;
 		L = FParams.max_speed / b->speed;
-		b->power = L * L;
+		b->power = L; // * L;
 	}
 	if ( b->speed == 0) vaxis = fwd;
 
@@ -467,7 +473,8 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	b->target.y *= FParams.pitch_decay; 
 	if ( b->target.y < FParams.pitch_min ) b->target.y = FParams.pitch_min;
 	if ( b->target.y > FParams.pitch_max ) b->target.y = FParams.pitch_max;	
-	if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
+	
+	// if ( fabs(b->target.y) < 0.0001) b->target.y = 0;
 
 	// Compute angular acceleration
 	// - as difference between current direction and desired direction
@@ -690,8 +697,6 @@ extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, in
 	if ( b->speed < FParams.min_speed) b->speed = FParams.min_speed;
 	if ( b->speed > FParams.max_speed) b->speed = FParams.max_speed;
 	b->vel = normalize(b->vel) * b->speed;
-
-
 
 	//b->vel.y *= 0.9999;
 	

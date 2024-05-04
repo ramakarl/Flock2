@@ -68,7 +68,7 @@ struct graph_t {
 #define GRAPH_ACCEL		3
 #define GRAPH_MAX			4
 
-#define NUM_BIRDS		5000
+#define NUM_BIRDS		10000
 #define MAX_BIRDS		65535
 
 #define SAMPLES			16384
@@ -326,42 +326,41 @@ void Sample::DefaultParams ()
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
 	m_Params.steps = 2;
-	m_Params.DT = 0.010;							// timestep (sec), .005 = 5 msec = 200 hz
+	m_Params.DT = 0.005;							// timestep (sec), .005 = 5 msec = 200 hz
 	
 	m_Params.mass =	0.08;							// bird mass (kg) - starling
-	m_Params.power = 0.2373;							// 100% power (in joules)
-	m_Params.min_speed = 3;					// min speed (m/s)		// Demsar2014
-	m_Params.max_speed = 20;					// max speed (m/s)		// Demsar2014		
+	m_Params.power = 0.2873;							// 100% power (in joules)
+	m_Params.min_speed = 5;						// min speed (m/s)		// Demsar2014
+	m_Params.max_speed = 18;					// max speed (m/s)		// Demsar2014		
 	m_Params.min_power = -20;					// min power (N)
 	m_Params.max_power = 20;					// max power (N)
 	m_Params.wind =	Vec3F(0,0,0);			// wind direction & strength
-	//m_Params.fov = 290;								// bird field-of-view (degrees), max = 360 deg (180 left & right)	
-	m_Params.fov = 320;								// bird field-of-view (degrees), max = 360 deg (180 left & right)	
+	m_Params.fov = 290;								// bird field-of-view (degrees), max = 360 deg (180 left & right)	
 	
 	// social factors
-	m_Params.boundary_cnt = 30;						// border width (# birds)	
-	m_Params.boundary_amt = 0.10f;				// border steering amount (keep <0.1)	
+	m_Params.boundary_cnt = 160;						// border width (# birds)	
+	m_Params.boundary_amt = 0.40f;				// border steering amount (keep <0.1)	
 	
 	//-- disable border
 	//	m_Params.border_cnt = 0;
 	//		m_Params.border_amt = 0.0f;
 
-	m_Params.avoid_angular_amt= 0.02f;	// bird angular avoidance amount
+	m_Params.avoid_angular_amt= 0.06f;	// bird angular avoidance amount
 	m_Params.avoid_power_amt =	0.00f;	// power avoidance amount (N)
 	m_Params.avoid_power_ctr =	3;			// power avoidance center (N)	
-	m_Params.align_amt = 0.600f;				// bird alignment amount
-	m_Params.cohesion_amt =	0.004f;			// bird cohesion amount
+	m_Params.align_amt = 0.500f;				// bird alignment amount
+	m_Params.cohesion_amt =	0.002f;			// bird cohesion amount
 
 	// flight parameters
 	m_Params.wing_area = 0.0224;
 	m_Params.lift_factor = 0.5714;			// lift factor
 	m_Params.drag_factor = 0.1731;			// drag factor 
 	m_Params.safe_radius = 2.0;					// radius of avoidance (m)
-	m_Params.pitch_decay = 0.95;				// pitch decay (return to level flight)
+	m_Params.pitch_decay = 0.99;				// pitch decay (return to level flight)
 	m_Params.pitch_min = -40;						// min pitch (degrees)
 	m_Params.pitch_max = 40;						// max pitch (degrees)	
-	m_Params.reaction_speed = 250;			// reaction speed (millisec)
-	m_Params.dynamic_stability = 0.7f;	// dyanmic stability factor
+	m_Params.reaction_speed = 2200;			// reaction speed (millisec)
+	m_Params.dynamic_stability = 0.9f;	// dyanmic stability factor
 	m_Params.air_density = 1.225;				// air density (kg/m^3)
 	m_Params.gravity = Vec3F(0, -9.8, 0);		// gravity (m/s^2)
 	m_Params.front_area = 0.1f;					// section area of bird into wind
@@ -449,25 +448,24 @@ void Sample::Reset (int num, int num_pred )
 			if (pos.Length() < 50 ) {				
 				grp = (n % 2);
 				pos += Vec3F( 0, 100, grp ? -70 : 70 );
-				vel = Vec3F(  0,   0, grp ?  10 :-10 );
+				vel = Vec3F(  0,   0, grp ?  18 :-18 );
 				h = grp ? 90 : -90;
 				b = AddBird ( pos, vel, Vec3F(0, 0, h), 3); 
 				//rb->clr = (grp==0) ? Vec4F(1,0,0,1) : Vec4F(0,1,0,1);
 				ok = true;
 			}
-		}  */
+		} */ 
 		
 		// randomly distribute birds
 		pos = m_rnd.randV3( -50, 50 );
 		pos.y = pos.y * .5f + 50;
 		
 		vel = m_rnd.randV3( -20, 20 );		
-		vel.y = 0;
-		vel *= 7.5 / vel.Length ();
-
-		h = m_rnd.randF(-180, 180);
+		vel *= 7.5 / vel.Length (); 
+		h = m_rnd.randF(-180, 180); 
 		b = AddBird ( pos, vel, Vec3F(0, 0, h), 1 );  
-		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f ); 	
+		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f ); 
+
 
 	}
 
@@ -494,7 +492,7 @@ void Sample::Reset (int num, int num_pred )
 
 	//m_Accel.bound_min = Vec3F(-50,   0, -50);
 	//m_Accel.bound_max = Vec3F( 50, 100,  50);
-	m_Accel.psmoothradius = 6;
+	m_Accel.psmoothradius = 12;
 	m_Accel.grid_density = 1.0;
 	m_Accel.sim_scale = 1.0;
 
@@ -1082,15 +1080,18 @@ void Sample::UpdateFlockData ()
 	Bird* b;	
 	for (int i=0; i < m_Params.num_birds; i++) {
 		b = (Bird*) m_Birds.GetElem( FBIRD, i);		
-		centroid += b->pos;
-		speed += b->speed;
-		plift += b->Plift;
-		pdrag += b->Pdrag;
-		pfwd  += b->Pfwd;
-		pturn += b->Pturn;
-		ptotal += b->Ptotal;
+		int gc = m_Birds.bufUI(FGCELL)[i];
+		if ( gc != GRID_UNDEF ) {		
+			centroid += b->pos;
+			speed += b->speed;
+			plift += b->Plift;
+			pdrag += b->Pdrag;
+			pfwd  += b->Pfwd;
+			pturn += b->Pturn;
+			ptotal += b->Ptotal;
+		}
 	}
-	centroid *= (1.0f / m_Params.num_birds);
+	centroid *= (1.0f / m_Params.num_birds);	
 		
 	m_Flock.centroid = centroid;
 	m_Flock.speed = speed / m_Params.num_birds;
@@ -2204,8 +2205,9 @@ void Sample::VisualizeSelectedBird ()
 	int gc = m_Birds.bufUI(FGCELL)[ ndx ];
 	if ( gc != GRID_UNDEF ) {			
 		Bird* bj;
-		float dsq, ave_dist = 0;
-		Vec3F dist;
+		float dsq, birdang, ave_dist = 0;
+		Vec3F dist, diri;
+		diri = b->vel; diri.Normalize();
 		uint j, cell, ncnt = 0;			
 
 		// find neighbors
@@ -2219,12 +2221,20 @@ void Sample::VisualizeSelectedBird ()
 					j = m_Grid.bufUI(AGRID)[cndx];
 					if (j==ndx) continue;
 					bj = (Bird*) m_Birds.GetElem ( FBIRD, j );
-					dist = b->pos - bj->pos;
+					dist = bj->pos - b->pos;
 					dsq = (dist.x*dist.x + dist.y*dist.y + dist.z*dist.z);
+					
 					if ( dsq < rd2 ) {							
-						ave_dist += sqrt( dsq );
-						ncnt++;
-						m_vis.push_back ( vis_t( bj->pos, 0.5f, Vec4F(1,1,0,1), "" ) );		// neighbor birds (yellow)
+						dsq = sqrt(dsq);
+						dist /= dsq;
+						birdang = diri.Dot ( dist );
+						if ( birdang > m_Params.fovcos ) {
+							ave_dist += dsq;
+							ncnt++;
+							m_vis.push_back ( vis_t( bj->pos, 0.5f, Vec4F(1,1,0,1), "" ) );		// neighbor birds (yellow)
+						} else {
+							m_vis.push_back ( vis_t( bj->pos, 0.5f, Vec4F(1,0,0,1), "" ) );		// neighbor birds (yellow)
+						}
 					}
 			}
 		}
@@ -2278,7 +2288,7 @@ void Sample::Run ()
 	//--- Outputs 
 	// OutputPointCloudFiles ( m_frame );  
 	// OutputPlot ( 0, m_frame );
-	OutputFFTW ( m_frame );
+	// OutputFFTW ( m_frame );
 
 	#ifdef DEBUG_BIRD
 		DebugBird ( 7, "Post-Advance" );
@@ -2373,7 +2383,7 @@ bool Sample::init ()
 	m_draw_vis = 0;
 	m_cam_mode = 0;	
 
-	m_method = 1;					// 0 = Flock2, 1 = Reynolds
+	m_method = 0;					// 0 = Flock2, 1 = Reynolds
 
 	m_rnd.seed (12);
 
@@ -2573,8 +2583,11 @@ void Sample::display ()
 			// visualization color
 			clr = b->clr;
 			if ( b->clr.w==0 ) {
-				float a = fmin(b->ang_accel.Length() / 12, 1);
+				float a = fmin(b->ang_accel.Length() / 6, 1);
 				clr = Vec4F( 0, a, 0, 1 );
+			}
+			if ( m_draw_vis==2) {
+				clr = Vec4F( 0, 0, 0, 1);
 			}
 			
 			// bird shape
@@ -2643,7 +2656,7 @@ void Sample::display ()
 		}				
 
 		// Energy scatter plot		
-		 xscal = m_Params.max_speed;
+		/* xscal = m_Params.max_speed;
 		//yscal = (m_method==0) ? 1e-4 : 5e-2;
 	  yscal = 50;
 		drawRect ( Vec2F( (m_Params.min_speed/xscal)*1000, 600 - 200), Vec2F( (m_Params.max_speed/xscal)*1000, 600), clr );
@@ -2654,7 +2667,7 @@ void Sample::display ()
 			b = (Bird*) m_Birds.GetElem(0, n);			
 			//drawCircle ( Vec2F( (b->speed/xscal)*1000, 600 - (b->Pturn / yscal)*200 ), 1.0, clr);
 			drawCircle ( Vec2F( (b->speed/xscal)*1000, 600 - (b->Ptotal / yscal)*200 ), 1.0, clr);
-		} 
+		}  */
 
 		// Graph 
 		if ( m_graph.size() > 0 ) {
