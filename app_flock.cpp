@@ -339,7 +339,7 @@ void Sample::DefaultParams ()
 	
 	// social factors
 	m_Params.boundary_cnt = 120;					// border width (# birds)	
-	m_Params.boundary_amt = 0.60f;			// border steering amount (keep <0.1)	
+	m_Params.boundary_amt = 0.40f;			// border steering amount (keep <0.1)	
 	
 	//-- disable border
 	//	m_Params.border_cnt = 0;
@@ -492,7 +492,7 @@ void Sample::Reset (int num, int num_pred )
 
 	//m_Accel.bound_min = Vec3F(-50,   0, -50);
 	//m_Accel.bound_max = Vec3F( 50, 100,  50);
-	m_Accel.psmoothradius = 12;
+	m_Accel.psmoothradius = 10;
 	m_Accel.grid_density = 1.0;
 	m_Accel.sim_scale = 1.0;
 
