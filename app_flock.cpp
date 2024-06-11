@@ -2395,7 +2395,7 @@ bool Sample::init ()
 
 	// Build FFTW arrays 
 	#ifdef USE_FFTW		
-		m_fftw_N = 64;
+		m_fftw_N = 512;
 		m_fftw_in = (double*) malloc ( sizeof(double) * m_fftw_N );
 		m_fftw_out = (fftw_complex*) fftw_malloc ( sizeof(fftw_complex) * m_fftw_N);
 		m_fftw_plan = fftw_plan_dft_r2c_1d ( m_fftw_N, m_fftw_in, m_fftw_out, FFTW_ESTIMATE );	
