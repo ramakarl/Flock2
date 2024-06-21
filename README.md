@@ -1,4 +1,4 @@
-<img src="https://github.com/ramakarl/Flock2/blob/main/docs/fig_flock2.jpg" width="600" />
+<img src="https://github.com/ramakarl/Flock2/blob/main/docs/fig_flock2.jpg" width="800" />
 
 ## Flock2: A model for orientation-based social flocking
 
