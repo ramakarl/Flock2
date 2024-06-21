@@ -1,5 +1,4 @@
 <img src="https://github.com/ramakarl/Flock2/blob/main/docs/fig_flock2.jpg" width="800" />
-Flock2 exhibits many different patterns similar to those found in real bird flocks even within a single simulation run. 
 
 ## Flock2: A model for orientation-based social flocking
 
