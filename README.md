@@ -18,6 +18,14 @@ the neighborhood around each bird, and introducing forces for avoidance, alignme
 
 Flock2 is the first orientation-based controller for collective flocking. The classical model by a) Craig Reynolds (1987) implements the social factors for alignment, avoidance and cohesion as 3D vector forces. b) Hildenbrandt et al. (2010) also introduce an aerodynamic model, however, the social forces do not influence the flight forces in their work as they are uncoupled. c) In Flock2 we introduce a *perceptual* model of social factors which projects the influence from nearest neighbors onto the visual sphere of each bird, and uses a target heading to strictly control an aerodynamic model. We demonstrate that a flight model strictly controlled by a 2D orientation-based high level controller is still able to produce flocking behaviors, including novel features such as emergent orientation waves not previously seen.  
 
+### Quick Installation
+Platforms: Windows or Linux<br>
+Requirements: CUDA Toolkit 10.2 or higher (GPU support)<br>
+Steps:<br>
+1. Clone this repository locally.<br>
+2. Install CUDA Toolkit 10.2 or higher to enable GPU support.<br>
+2. Run build_all.bat (Windows) or build_all.sh (Linux) for your platform.<br>
+
 ### Rama Carl Hoetzlein (c) 2023-2024. MIT License
 [https://ramakarl.com](https://ramakarl.com)
 
