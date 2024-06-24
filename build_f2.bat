@@ -9,7 +9,8 @@ echo ### Also install CUDA Toolkit 10.2 or higher for GPU support.
 echo. 
 echo ### Stop and edit this .bat file to set your own Visual Studio path (if not using VS2019)
 echo.
-path=%path%;"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin"
+
+path=%path%;C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin
 
 echo ### Would you like to enable GPU build?
 
