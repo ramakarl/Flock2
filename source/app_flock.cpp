@@ -1,15 +1,13 @@
 //--------------------------------------------------------
 //
-// Flock v2
-// Rama Hoetzlein, 2023
+// Flock2
 //
 //--------------------------------------------------------------------------------
-// Copyright 2023 (c) Quanta Sciences, Rama Hoetzlein, ramakarl.com
+// Copyright 2023-2024 (c) Rama Hoetzlein, Quanta Sciences, ramakarl.com
 //
 // * Derivative works may append the above copyright notice but should not remove or modify earlier notices.
 //
 // MIT License:
-
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and 
 // associated documentation files (the "Software"), to deal in the Software without restriction, including without 
 // limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, 
@@ -36,7 +34,14 @@
 
 using namespace std;
 
-#define DEBUG_CUDA		true	
+#define NUM_BIRDS		10000
+#define MAX_BIRDS		65535
+
+#define SAMPLES			16384
+#define PLOT_RESX		2048
+#define PLOT_RESY		800
+
+#define DEBUG_CUDA		false	
 //#define DEBUG_BIRD		7
 
 #include "gxlib.h"			// low-level render
@@ -64,16 +69,9 @@ struct graph_t {
 };
 #define GRAPH_BANK		0
 #define GRAPH_PITCH		1
-#define GRAPH_VEL			2
+#define GRAPH_VEL		2
 #define GRAPH_ACCEL		3
-#define GRAPH_MAX			4
-
-#define NUM_BIRDS		10000
-#define MAX_BIRDS		65535
-
-#define SAMPLES			16384
-#define PLOT_RESX		2048
-#define PLOT_RESY		800
+#define GRAPH_MAX		4
 
 // FFTW Analysis
 #ifdef USE_FFTW
@@ -2837,7 +2835,7 @@ void Sample::reshape (int w, int h)
 void Sample::startup ()
 {
 	int w = 2048, h = 1250;
-	appStart ( "Flock v2 (c) Rama Karl 2023, MIT license", "Flock v2", w, h, 4, 2, 16, false );	
+	appStart ( "Flock2", "Flock2", w, h, 4, 2, 16, false );	
 }
 
 void Sample::shutdown()

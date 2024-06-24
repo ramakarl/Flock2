@@ -1,5 +1,9 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 2.8...3.5)
+
 set (CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR} CACHE PATH "")
+
+# CUDA policy. Use older FindCUDA (not using: cmake >3.27 first-class support for .cu files)
+cmake_policy(SET CMP0146 OLD)
 
 set(PROJNAME Flock2)
 Project(${PROJNAME})
@@ -69,7 +73,7 @@ set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG /OP
 #####################################################################################
 # FFTW
 #
-find_package(FFTW)
+find_package(FFTW QUIET)
 
 if (FFTW_FOUND)    
   add_definitions(-DUSE_FFTW)    
@@ -78,9 +82,13 @@ if (FFTW_FOUND)
   include_directories( "${LIBEXT_REPO}/include" )  
   _EXPANDLIST( OUTPUT PACKAGE_DLLS SOURCE ${FFTW_LIB_DIR} FILES ${FFTW_DLL} )
   message ( STATUS "  ---> Using FFTW 3.3")  
+else()
+  message ( "WARNING: 
+  FFTW not found. Frequency analysis will not be enabled. 
+  Set cmake LIBEXT_REPO variable to a /libext which contains 
+  FindFFTW.cmake and libfftw3-3.lib/dll/so.
+  ")
 endif()
-
-
 
 #####################################################################################
 # Asset Path
@@ -95,7 +103,7 @@ add_definitions(-DASSET_PATH="${ASSET_PATH}/")
 #####################################################################################
 # Executable
 #
-file(GLOB MAIN_FILES *.cpp *.c *.h )
+file(GLOB MAIN_FILES source/*.cpp source/*.c source/*.h )
 
 unset ( ALL_SOURCE_FILES )
 
