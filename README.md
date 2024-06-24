@@ -25,11 +25,11 @@ Flock2 contains a low-level controller to model the Aerodynamic Forces of each b
 
 ### Quick Installation
 Platforms: Windows or Linux<br>
-Requirements: CUDA Toolkit 10.2 or higher (GPU support)<br>
 Steps:<br>
 1. Clone this repository locally.<br>
-2. Install CUDA Toolkit 10.2 or higher to enable GPU support.<br>
-2. Run build_all.bat (Windows) or build_all.sh (Linux) for your platform.<br>
+2. Install Git (cmdline), Cmake and Visual Studio 2019 or higher.
+3. For GPU support (NVIDIA only), install CUDA Toolkit 10.2 or higher.<br>
+4. Run **build_all.bat** (Windows) or **build_all.sh** (Linux) for your platform.<br>
 
 ### Rama Carl Hoetzlein (c) 2023-2024. MIT License
 [https://ramakarl.com](https://ramakarl.com)
