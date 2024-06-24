@@ -1165,15 +1165,17 @@ void Sample::StartNextRun ()
 {
 	// record the last run
 	// printf ( "run, num_run, val, #bird, #peaks, peak_ave, g0_min,g0_max, g1_min,g1_max, g2_min,g2_max, g3_min,g3_max\n" );
-	if (m_run >= 0) {
-	  fprintf ( m_runs_outfile, "%d,%d,%f, %d,%d,%f, %f, %f,%f, %f,%f, %f,%f, %f,%f\n", m_run, m_num_run, m_val.z, m_Params.num_birds, m_peak_cnt, m_peak_ave, m_peak_max, 
-		  m_freq_gmin[0],m_freq_gmax[0], m_freq_gmin[1],m_freq_gmax[1], m_freq_gmin[2],m_freq_gmax[2], m_freq_gmin[3],m_freq_gmax[3] );
+	#ifdef USE_FFTW
+		if (m_run >= 0) {
+		  fprintf ( m_runs_outfile, "%d,%d,%f, %d,%d,%f, %f, %f,%f, %f,%f, %f,%f, %f,%f\n", m_run, m_num_run, m_val.z, m_Params.num_birds, m_peak_cnt, m_peak_ave, m_peak_max, 
+			  m_freq_gmin[0],m_freq_gmax[0], m_freq_gmin[1],m_freq_gmax[1], m_freq_gmin[2],m_freq_gmax[2], m_freq_gmin[3],m_freq_gmax[3] );
 
-		// close & reopen to save 
-		fclose ( m_runs_outfile );
-		m_runs_outfile = fopen ( "output.csv", "a" );	
-	}	
-	
+			// close & reopen to save 
+			fclose ( m_runs_outfile );
+			m_runs_outfile = fopen ( "output.csv", "a" );	
+		}	
+	#endif
+
 	// advance run
 	m_run++;
 
@@ -1192,6 +1194,8 @@ void Sample::StartNextRun ()
 
 void Sample::OutputFFTW ( int frame )
 {
+
+  #ifdef USE_FFTW
 	Bird* b;
 	float ang_accel;
 	Vec4F c;
@@ -1405,6 +1409,8 @@ void Sample::OutputFFTW ( int frame )
 	if ( xi % xdiv == 0 ) {
 		m_plot[0].Commit ();
 	}
+
+  #endif
 }
 
 
@@ -2836,10 +2842,12 @@ void Sample::startup ()
 
 void Sample::shutdown()
 {
+  #ifdef USE_FFTW
 	// destroy FFTW buffers	
 	fftw_destroy_plan( m_fftw_plan);
 	fftw_free ( m_fftw_out );
 	free ( m_fftw_in );
+  #endif
 }
 
 
