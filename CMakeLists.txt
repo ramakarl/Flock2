@@ -63,7 +63,7 @@ _REQUIRE_GLEW()
 
 OPTION ( BUILD_CUDA "Build CUDA for GPU." false )
 if (BUILD_CUDA)
-  _REQUIRE_CUDA( TRUE, "." )
+  _REQUIRE_CUDA( TRUE, "source" )
 endif()
 
 #--- symbols in release mode

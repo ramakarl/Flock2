@@ -402,7 +402,6 @@ void Sample::Reset (int num, int num_pred )
 {
 	Vec3F pos, vel;
 	float h;
-	int grp;
 	Bird* b;
 	Predator* p;
 
@@ -797,7 +796,7 @@ void Sample::PrefixSumGrid ()
 		// compute master grid list
 		uint* pgcell = m_Birds.bufUI (FGCELL);
 		uint* pgndx = m_Birds.bufUI (FGNDX);		
-		int gs, sort_ndx;
+		int sort_ndx;
 		for (int k=0; k < numPoints; k++) {
 			mgrid[k] = GRID_UNDEF;
 		}
@@ -838,7 +837,8 @@ void Sample::FindNeighbors ()
 		float d2 = d * d;
 		float rd2 = (m_Accel.psmoothradius*m_Accel.psmoothradius) / d2;	
 		int	nadj = (m_Accel.gridRes.z + 1)*m_Accel.gridRes.x + 1;
-		uint j, cell;
+		int j;
+		uint cell;
 		Vec3F posi, posj, dist;	
 		Vec3F diri, dirj;
 		Vec3F cdir;
@@ -851,7 +851,7 @@ void Sample::FindNeighbors ()
 
 		Bird *bi, *bj;
 
-		float ang, birdang;		
+		float birdang;		
 		
 		// topological distance
 		float sort_d_nbr[12];
@@ -1523,17 +1523,15 @@ void Sample::AdvanceByOrientation ()
 		Vec3F force, lift, drag, thrust, accel;
 		Vec3F diri, dirj;
 		Quaternion ctrl_pitch;
-		float airflow, dynamic_pressure, aoa;
+		float airflow, aoa;
 
-		float CL, L, dist, cd, vd;
+		float L, dist;
 		float pitch, yaw;
 		Quaternion ctrlq, tq;
 		Vec3F angs;
 		Quaternion angvel;
-		Bird *b, *bj, *bfwd;
+		Bird *b, *bj;
 		Predator* p;
-		bool leader;
-		float ave_yaw;
 
 		Vec3F centroid (0,50,0);
 		
@@ -1805,8 +1803,7 @@ void Sample::AdvanceByVectors ()
 		//  1987, Craig Reynolds. "Flocks, herds and schools: A distributed behavioral model"
 		//
 		Vec3F dirj, force, accel;
-		Bird *b, *bj, *bfwd;
-		Predator* p;
+		Bird *b, *bj;		
 	
 		//--- Reynold's model
 		//
@@ -1867,7 +1864,7 @@ void Sample::Advance_pred()
 	Vec3F   angs;
 	Quaternion angvel;
 	//Bird *b, *bj, *bfwd;
-	Predator* p, * pj;
+	Predator* p;
 	float   dist_target_bird;
 	predState new_state;
 
@@ -2507,7 +2504,6 @@ void Sample::drawBackground ()
 
 void Sample::display ()
 {	
-	char msg[2048];
 	Vec3F x,y,z;
 	Vec3F pnt;
 	Vec4F clr;
