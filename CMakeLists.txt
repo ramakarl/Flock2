@@ -26,7 +26,7 @@ if (NOT LIBMIN_FOUND)
 
   Message ( FATAL_ERROR "
   This project requires libmin. 
-  Set LIBMIN_CMAKES to the libmin repository path for /libmin/cmake.
+  Set LIBMIN_ROOT to the libmin repository path for /libmin/cmake.
   " )
 
 else()
@@ -77,15 +77,15 @@ find_package(FFTW QUIET)
 
 if (FFTW_FOUND)    
   add_definitions(-DUSE_FFTW)    
-  list ( APPEND LIBRARIES_OPTIMIZED "${LIBEXT_REPO}/win64/libfftw3-3.lib" )
-  list ( APPEND LIBRARIES_DEBUG "${LIBEXT_REPO}/win64/libfftw3-3.lib" )  
-  include_directories( "${LIBEXT_REPO}/include" )  
+  list ( APPEND LIBRARIES_OPTIMIZED "${LIBEXT_ROOT}/win64/libfftw3-3.lib" )
+  list ( APPEND LIBRARIES_DEBUG "${LIBEXT_ROOT}/win64/libfftw3-3.lib" )  
+  include_directories( "${LIBEXT_ROOT}/include" )  
   _EXPANDLIST( OUTPUT PACKAGE_DLLS SOURCE ${FFTW_LIB_DIR} FILES ${FFTW_DLL} )
   message ( STATUS "  ---> Using FFTW 3.3")  
 else()
   message ( "WARNING: 
   FFTW not found. Frequency analysis will not be enabled. 
-  Set cmake LIBEXT_REPO variable to a /libext which contains 
+  Set cmake LIBEXT_ROOT variable to a /libext which contains 
   FindFFTW.cmake and libfftw3-3.lib/dll/so.
   ")
 endif()
