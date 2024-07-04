@@ -128,8 +128,8 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 	int k, m;
 
 	// topological distance
-	float sort_d_nbr[12];
-	int sort_j_nbr[12];
+	float sort_d_nbr[16];
+	int sort_j_nbr[16];
 	int sort_num = 0;
 	sort_d_nbr[0] = 10^5;
 	sort_j_nbr[0] = -1;
@@ -187,7 +187,7 @@ extern "C" __global__ void findNeighborsTopological ( int pnum)
 						sort_j_nbr[k] = j;
 						
 						// max topological neighbors
-						if (++sort_num > 7 ) sort_num = 7;
+						if (++sort_num > FParams.neighbors ) sort_num = FParams.neighbors;
 					}	
 
 					// count boundary neighbors
@@ -315,7 +315,7 @@ inline __device__ __host__ float circleDelta(float b, float a)
 }
 
 
-extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss, int numPnts )
+extern "C" __global__ void advanceOrientationHoetzlein ( float time, float dt, float ss, int numPnts )
 {		
 	uint i = __mul24(blockIdx.x, blockDim.x) + threadIdx.x;	// particle index				
 	if ( i >= numPnts ) return;
@@ -606,7 +606,7 @@ extern "C" __global__ void advanceByOrientation ( float time, float dt, float ss
 	#endif
 }
 
-extern "C" __global__ void advanceByVectors ( float time, float dt, float ss, int numPnts )
+extern "C" __global__ void advanceVectorsReynolds ( float time, float dt, float ss, int numPnts )
 {		
 	uint i = __mul24(blockIdx.x, blockDim.x) + threadIdx.x;	// particle index				
 	if ( i >= numPnts ) return;

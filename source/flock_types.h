@@ -132,6 +132,7 @@
 		int			steps;
 		int			num_birds;
 		int			num_predators; 		// ****
+		int			neighbors;
 		float		DT;
 		float		mass;
 		float		power;
