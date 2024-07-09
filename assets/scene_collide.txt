@@ -1,19 +1,20 @@
 gpu:			1
-visualize:		0
+visualize:		1
+analysis:		1
 method:			0
 
 num_birds:		10000
 neighbors:		7
-steps: 			1
+steps: 			2
 dt: 			0.005
 mass: 			0.08
 power:			0.3173
 min_speed: 		5
 max_speed: 		18
 fov: 			240
-boundary_cnt: 		120
-boundary_amt: 		0.40
-avoid_angular_amt: 	0.01
+boundary_cnt: 		0
+boundary_amt: 		0.00000
+avoid_angular_amt: 	0.01 
 align_amt: 		0.400
 cohesion_amt: 		0.001
 wing_area:		0.0224
@@ -25,4 +26,8 @@ reaction_speed:		4000
 dynamic_stability:	0.8
 air_density:		1.225
 front_area:		0.1
+
+reynolds_avoidance:	1.2
+reynolds_alignment:	0.6
+reynolds_cohesion:	0.2
 

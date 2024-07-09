@@ -712,8 +712,7 @@ extern "C" __global__ void advanceVectorsReynolds ( float time, float dt, float 
 	if ( b->pos.y < FAccel.bound_min.y ) b->pos.y = FAccel.bound_max.y;
 	if ( b->pos.y > FAccel.bound_max.y ) b->pos.y = FAccel.bound_min.y;	
 
-	// [stats only] Compute angular acceleration, does not affect sim
-	
+	// [stats only] Compute angular acceleration, does not affect sim	
 	v1 = normalize ( b->vel );
 	q = quat_rotation_fromto ( v0, v1, 1.0 );	
 	b->ang_accel = quat_to_euler ( q );

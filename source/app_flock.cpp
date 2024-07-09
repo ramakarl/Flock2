@@ -39,7 +39,7 @@ using namespace std;
 
 #define SAMPLES			16384
 #define PLOT_RESX		2048
-#define PLOT_RESY		800
+#define PLOT_RESY		1200
 
 #define DEBUG_CUDA		false	
 //#define DEBUG_BIRD		7
@@ -584,19 +584,20 @@ void Flock2::Reset (int num, int num_pred )
 	for (int n=0; n < numPoints; n++ ) {
 		
 		//-- test: head-on impact of two bird flocks
-		/* bool ok = false;
+    /* int grp;
+		bool ok = false;
 		while (!ok) {
 			pos = m_rnd.randV3( -50, 50 );
 			if (pos.Length() < 50 ) {				
 				grp = (n % 2);
-				pos += Vec3F( 0, 100, grp ? -70 : 70 );
-				vel = Vec3F(  0,   0, grp ?  18 :-18 );
+				pos += Vec3F( 0, 100, grp ? -80 : 80 );
+				vel = Vec3F(  0,   0, grp ?  10 :-10 );
 				h = grp ? 90 : -90;
 				b = AddBird ( pos, vel, Vec3F(0, 0, h), 3); 
 				//rb->clr = (grp==0) ? Vec4F(1,0,0,1) : Vec4F(0,1,0,1);
 				ok = true;
 			}
-		} */ 
+		} */
 		
 		// randomly distribute birds
 		pos = m_rnd.randV3( -50, 50 );
@@ -607,7 +608,6 @@ void Flock2::Reset (int num, int num_pred )
 		h = m_rnd.randF(-180, 180); 
 		b = AddBird ( pos, vel, Vec3F(0, 0, h), 1 );  
 		b->clr = Vec4F( (pos.x+100)/200.0f, pos.y/200.f, (pos.z+100)/200.f, 1.f ); 
-
 
 	}
 
@@ -629,8 +629,8 @@ void Flock2::Reset (int num, int num_pred )
 	
 	// Initialize accel grid
 	//
-	m_Accel.bound_min = Vec3F(-100,   0, -100);
-	m_Accel.bound_max = Vec3F( 100, 150,  100);
+	m_Accel.bound_min = Vec3F(-200,   0, -100);
+	m_Accel.bound_max = Vec3F( 200, 150,  100);
 
 	//m_Accel.bound_min = Vec3F(-50,   0, -50);
 	//m_Accel.bound_max = Vec3F( 50, 100,  50);
@@ -1420,11 +1420,15 @@ void Flock2::OutputFFTW ( int frame )
 			for (int g=0; g<4; g++) {
 				m_freq_grp[xi][g] = 0;
 			}
+			
+      float f_amp = 1.0;		// freq amplifier (for plot)
 		
 			// Plot Spectrogram - plot power of frequencies for current time		
 			for (int f=1; f < N/2; f++) {					
 				v = fmax(0, fmin( 1, 0.01f * 10. * log(fmag[f] + 1e-6) / log(10) ));		// dB						
-				v = v*v / 5.f;
+				
+				v = v*v * f_amp;
+
 				if (f < N/4) {
 					energy += v;				
 				}
@@ -1439,21 +1443,24 @@ void Flock2::OutputFFTW ( int frame )
 			}				
 		
 			// plot and record total spectral energy
-			c = Vec4F(0,0,0,1);			
-			energy = energy * 0.5 / (N/256.0f); // - 1.2f;
+			//
+			float	e_amp = 0.25f;				// energy amplifier (for plot)
+
+			
+			energy = energy * e_amp / (N/256.0f); 
 			m_fftw_energy [ xf ] = energy;					
 
 			// plot weighted ave. frequency 
 			Vec4F clrgrp[4];
-			clrgrp[0] = Vec4F(1,0,0,1);
-			clrgrp[1] = Vec4F(1,1,0,1);
-			clrgrp[2] = Vec4F(0,1,0,1);
-			clrgrp[3] = Vec4F(0,0,1,1);
+			clrgrp[0] = Vec4F(1,0,0,1);			//  low f, red
+			clrgrp[1] = Vec4F(1,1,0,1);			//  mid f, yellow
+			clrgrp[2] = Vec4F(0,1,0,1);			// high f, green
+			clrgrp[3] = Vec4F(0,0,1,1);			// vhig f, blue
 			for (int g=0; g < 4; g++) {
 				m_freq_grp[xi][g] = m_freq_grp[xi][g] * 0.5 / (N/256.0f);
 				m_plot[0].SetPixel ( xf, PLOT_RESY - m_freq_grp[xi][g]*400, clrgrp[g] );		
 			}		
-			//printf ( "%f, %f\n", m_fftw_energy[xf], energy );
+	
 		
 
 			// 200 hz = 1 sec		
@@ -1471,9 +1478,9 @@ void Flock2::OutputFFTW ( int frame )
 				m_lines.clear ();					// clear fit line(s)
 			
 				// pad first N/2 samples
-				for (int j = 0; j <= N/2; j++) {
-					m_fftw_energy[j] = m_fftw_energy[N/2];
-				}
+				//for (int j = 0; j <= N/2; j++) {
+			//					m_fftw_energy[j] = m_fftw_energy[N/2];
+			//	}
 				for (int j = 0; j <= N; j++) {
 					m_freq_grp[j][0] = m_freq_grp[N+1][0];
 					m_freq_grp[j][1] = m_freq_grp[N+1][1];
@@ -1482,7 +1489,8 @@ void Flock2::OutputFFTW ( int frame )
 				}
 				// smooth the energy func
 				memcpy (m_fftw_s1, m_fftw_energy, sizeof(float) * xf );			
-				for (int iter=0; iter < 20; iter++) {
+				
+				for (int iter=0; iter < 5; iter++) {
 					m_fftw_s1[0] = m_fftw_s1[1];
 					m_fftw_s1[xf-1] = m_fftw_s1[xf-2];
 					for (int j = 1; j <= xf-2; j++) {
@@ -1490,10 +1498,16 @@ void Flock2::OutputFFTW ( int frame )
 					}
 					memcpy ( m_fftw_s1, m_fftw_s2, sizeof(float) * xf );
 				}
+				//printf("%f, %f\n", m_fftw_energy[xf], m_fftw_s2[xf]);
+
 				// collect energy func as points
+				c = Vec4F(1, 1, 1, 1);
 				for (int j = 0; j < xf; j++) {
 					pnts.push_back ( Vec2F( j, m_fftw_s2[j] ) );				
-					m_plot[0].SetPixel ( j, PLOT_RESY - m_fftw_s2[j]*400, c );		
+					m_plot[0].SetPixel( j, PLOT_RESY - m_fftw_s2[j]*400, c );			
+					m_plot[0].SetPixel( j, PLOT_RESY - m_fftw_s2[j] * 400 + 1, c);
+					m_plot[0].SetPixel( j+1, PLOT_RESY - m_fftw_s2[j] * 400, c);
+					m_plot[0].SetPixel( j+1, PLOT_RESY - m_fftw_s2[j] * 400 + 1, c);
 				}
 				// fit a line to energy
 				double A, B, C, m, b;
@@ -1512,7 +1526,7 @@ void Flock2::OutputFFTW ( int frame )
 					if ( e[0] < e[2] && e[2] < e[3] && e[3] > e[4] && e[4] > e[6] && diff > 0.01 ) { 					
 						// compute diff to line					
 						sprintf ( txt, "%4.1f", diff*100.0f);
-						m_vis.push_back ( vis_t( Vec3F( j, PLOT_RESY-e[3]*400, 0), 2.0f, Vec4F(0,0,0,1), txt ) );
+						m_vis.push_back ( vis_t( Vec3F( j, PLOT_RESY-e[3]*400, 0), 2.0f, Vec4F(1,1,1,1), txt ) );
 						if ( diff*100.0 > m_peak_max ) m_peak_max = diff*100.0f;
 						m_peak_ave += diff*100.0f;
 						m_peak_cnt++;					
@@ -1522,7 +1536,7 @@ void Flock2::OutputFFTW ( int frame )
 				if ( m_peak_cnt > 0 ) {
 					m_peak_ave /= m_peak_cnt;				
 				}
-				printf ( "%d %f %f\n", m_peak_cnt, m_peak_ave, m_peak_max );
+				printf ( "peaks: %d, ave: %f, max: %f\n", m_peak_cnt, m_peak_ave, m_peak_max );
 			
 				// measure min/max frequency groups
 				for (int g=0; g < 4; g++) {
@@ -1533,8 +1547,9 @@ void Flock2::OutputFFTW ( int frame )
 						if ( m_freq_grp[j][g] > m_freq_gmax[g] ) m_freq_gmax[g] = m_freq_grp[j][g];
 					}				
 				}
-				m_lines.push_back ( Vec4F(0, PLOT_RESY-m_freq_gmin[0]*400, xf, PLOT_RESY-m_freq_gmin[0]*400 ) );
-				m_lines.push_back ( Vec4F(0, PLOT_RESY-m_freq_gmax[0]*400, xf, PLOT_RESY-m_freq_gmax[0]*400 ) );
+				
+				//m_lines.push_back ( Vec4F(0, PLOT_RESY-m_freq_gmin[0]*400, xf, PLOT_RESY-m_freq_gmin[0]*400 ) );
+				//m_lines.push_back ( Vec4F(0, PLOT_RESY-m_freq_gmax[0]*400, xf, PLOT_RESY-m_freq_gmax[0]*400 ) );
 			}
 		}
 
@@ -2537,7 +2552,7 @@ bool Flock2::init ()
 
 	// Build FFTW arrays 
 	#ifdef USE_FFTW		
-		m_fftw_N = 256;
+		m_fftw_N = 512;
 		m_fftw_in = (double*) malloc ( sizeof(double) * m_fftw_N );
 		m_fftw_out = (fftw_complex*) fftw_malloc ( sizeof(fftw_complex) * m_fftw_N);
 		m_fftw_plan = fftw_plan_dft_r2c_1d ( m_fftw_N, m_fftw_in, m_fftw_out, FFTW_ESTIMATE );	
@@ -2583,7 +2598,7 @@ bool Flock2::init ()
 	//
 	m_run = -1;																				// setup run
 	m_num_run = 20;																		// number of samples points
-	m_start_frame = 10.0f / m_Params.DT;							// settling time (secs), before measurements start	
+	m_start_frame = 0.0f / m_Params.DT;							// settling time (secs), before measurements start	
 	m_end_frame = 40.0f /m_Params.DT + m_start_frame; // end time (secs)
 
 	// tests
@@ -2617,13 +2632,13 @@ void Flock2::drawBackground ()
 		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
 		break;
 	case 1:
+		// infovis - green angular accel
+		drawFill(Vec2F(0, 0), Vec2F(w, h), Vec4F(.4, .4, .4, 1));
+		break;
+	case 2:
 		// black & white 
 		drawFill(Vec2F(0, 0), Vec2F(w, h), Vec4F(1, 1, 1, 1));		
-		break;	
-	case 2:
-		// infovis - green angular accel
-		drawFill(Vec2F(0, 0), Vec2F(w, h), Vec4F(.3, .3, .3, 1));		
-		break;
+		break;		
 	};
 }
 
@@ -2637,6 +2652,8 @@ void Flock2::display ()
 
 	Bird* b;
 	Predator* p;
+
+	glLineWidth ( 2 );
 
 	// Advance simulation
 	if (m_running) { 		
@@ -2691,7 +2708,7 @@ void Flock2::display ()
 		}		
 
 		// Draw centroid
-		if (m_visualize == 2 ) {
+		if (m_visualize == 1 ) {
 			drawCircle3D(m_Flock.centroid, 0.5, Vec4F(Vec4F(0.804, 0.961, 0.008, 1)));
 		}
 
@@ -2704,9 +2721,10 @@ void Flock2::display ()
 
 			// bird color
 			clr = Vec4F(0, 0, 0, 1);							// default. black on sky/white.			
-			if (m_visualize==2) {									// infovis coloring..				
+			if (m_visualize==1) {									// infovis coloring..				
+
 					if ( b->clr.w==0) {
-						float a = fmin(b->ang_accel.Length() / 64, 1);
+						float a = fmin(b->ang_accel.Length() / 24, 1);
 						clr = Vec4F( 0, a, 0, 1 );			// untagged, use green = angular accel
 					} else {
 						clr = b->clr;										// use tagged color (orange=boundary bird)
@@ -2714,10 +2732,10 @@ void Flock2::display ()
 			}
 			
 			// bird shape
-			if (m_visualize==2 ) {
+			if (m_visualize==1 ) {
 
 				// line
-				drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ),	clr );				
+				drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ),	clr );								
 
 			} else {
 
@@ -2769,8 +2787,9 @@ void Flock2::display ()
 
 			// FFT fit line
 			for (int k=0; k < m_lines.size(); k++) {
-				drawLine ( Vec2F(m_lines[k].x, m_lines[k].y), Vec2F(m_lines[k].z, m_lines[k].w), Vec4F(0,0,0,0.3) );
+				drawLine ( Vec2F(m_lines[k].x, m_lines[k].y), Vec2F(m_lines[k].z, m_lines[k].w), Vec4F(.8,0.8,0.8, 1.0) );
 			}
+
 			// FFT energy peaks			
 		  for (int k=0; k < m_vis.size(); k++) {
 				drawCircle ( m_vis[k].pos, m_vis[k].radius, m_vis[k].clr );				
@@ -2970,7 +2989,7 @@ void Flock2::startup ()
 	SetupParams();
 	DefaultParams();
 
-	int w = 2048, h = 1250;
+	int w = 3840, h = 2048;
 	appStart ( "Flock2 (c) 2024 Hoetzlein", "Flock2", w, h, 4, 2, 16, false );	
 
 	// on_arg is called before init() to load scene and config parameters
