@@ -3,7 +3,7 @@
 ## Flock2: A model for orientation-based social flocking
 
 This repository holds the source code for the paper:<br>
-Hoetzlein, Rama. "Flock2: A model for orientation-based social flocking", Journal of Theoretical Biology, 2024<br>
+Hoetzlein, Rama. [Flock2: A model for orientation-based social flocking](https://www.sciencedirect.com/science/article/pii/S0022519324001644), Journal of Theoretical Biology, 2024<br>
 
 ### Supplementary Video
 👉 Supplementary video for the paper can be found here:
