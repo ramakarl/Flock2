@@ -97,8 +97,9 @@ if ( NOT DEFINED ASSET_PATH )
    get_filename_component ( _assets "${CMAKE_CURRENT_SOURCE_DIR}/assets" REALPATH )
    set ( ASSET_PATH ${_assets} CACHE PATH "Full path to /assets" )   
 endif()
-file(GLOB GLSL_FILES ${ASSET_PATH}/*.glsl )
 add_definitions(-DASSET_PATH="${ASSET_PATH}/")
+
+file(GLOB GLSL_FILES ${ASSET_PATH}/*.glsl )
 
 #####################################################################################
 # Executable
