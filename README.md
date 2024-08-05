@@ -3,11 +3,11 @@
 ## Flock2: A model for orientation-based social flocking
 
 This repository holds the source code for the paper:<br>
-Hoetzlein, Rama. "Flock2: A model for orientation-based social flocking", Journal of Theoretical Biology, 2024<br>
+Hoetzlein, Rama. [Flock2: A model for orientation-based social flocking](https://www.sciencedirect.com/science/article/pii/S0022519324001644), Journal of Theoretical Biology, 2024<br>
 
 ### Supplementary Video
-Supplementary video for the paper can be found here:
-[Flock2: Youtube video](https://www.youtube.com/watch?v=lDEXNLLCwRU)
+👉 Supplementary video for the paper can be found here:
+[Youtube video: Flock2](https://www.youtube.com/watch?v=GGF28-t4wAY)
 
 ### Abstract
 The aerial flocking of birds, or murmurations, have fascinated observers while presenting many challenges to behavioral study and simulation. We examine how the periphery of murmurations remain well bounded and cohesive. We also investigate agitation waves, which occur when a flock is disturbed, developing a plausible model for how they might emerge spontaneously. To understand these behaviors a new model is presented for orientation-based social flocking. Previous methods model inter-bird dynamics by considering
