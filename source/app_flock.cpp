@@ -29,6 +29,7 @@
 #include "common_cuda.h"
 #include "geom_helper.h"
 #include "string_helper.h"
+#include "meshx.h"
 
 #include <fstream>
 #include <iostream>
@@ -89,6 +90,24 @@ struct graph_t {
 	#include <fftw3.3/fftw3.h>	
 #endif
 
+// VBO buffer ids
+#define VBO_NULL	255
+#define VBO_POS		0
+#define VBO_NORM	1
+#define VBO_UVS		2
+#define VBO_CLR		3
+#define VBO_FACES	4
+#define VBO_MAX		5
+
+// Renderable mesh
+struct RMesh {
+	RMesh() { for (int n=0; n < VBO_MAX; n++) mVBO[n] = VBO_NULL; }
+	std::string		name;	
+	MeshX*				mesh;						// mesh geometry (cpu)	
+	GLint					mVBO[VBO_MAX];	// opengl VBO
+	int						vert_cnt;
+};
+
 // Application
 //
 class Flock2 : public Application {
@@ -136,6 +155,10 @@ public:
 	void			CameraToCentroid ();
 	void			drawBackground();
 	void			drawGrid( Vec4F clr );
+	int				LoadMesh ( int i, std::string name, float scale=1);
+	void			SketchMesh ( int i );
+	void			RenderBirdsWithMesh( int i );
+	void			RenderBirdsWithDart();
 
 	// Acceleration
 	void			InitializeGrid ();
@@ -184,7 +207,7 @@ public:
 	int				mouse_down;
 	int				m_bird_sel, m_bird_ndx;
 	bool			m_cockpit_view;
-	bool			m_draw_sphere;
+	int				m_draw_mesh;
 	bool			m_draw_grid;
 	bool			m_draw_plot;	
 	bool			m_kernels_loaded;
@@ -192,6 +215,8 @@ public:
 	float			closest_bird;	
 	int				bird_count = 0;
 	int				runcount = 0;
+
+  RMesh			m_obj[4];
 	
 	// Stats - Output files	
 	FILE*			m_runs_outfile;
@@ -343,7 +368,7 @@ void Flock2::DefaultParams ()
 	// SI units:
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
-	m_Params.num_birds = 10000;
+	m_Params.num_birds = 1000;
 	m_Params.num_predators = 0;
   m_Params.neighbors = 7;
 
@@ -2539,7 +2564,7 @@ bool Flock2::init ()
 	
 	m_running = true;
 	m_cockpit_view = false;
-	m_draw_sphere = false;
+	m_draw_mesh = 0;
 	m_draw_grid = false;	
 	m_cam_mode = 0;	
 
@@ -2618,9 +2643,220 @@ bool Flock2::init ()
 
 	StartNextRun ();				// this will call Reset
 	
+	// Load 3D mesh
+	LoadMesh (0, "starling_low_poly.obj", 5.0 );	
+	LoadMesh (1, "putto.obj", 2.0);
 
 	return true;
 }
+
+
+int Flock2::LoadMesh (int i, std::string name, float scale)
+{	
+	// Allocate mesh object
+	m_obj[i].mesh = new MeshX;
+	m_obj[i].name = name;
+	
+// Load geometry from disk		
+	std::string fpath;
+	if (!getFileLocation(name, fpath))	{ dbgprintf("ERROR: Unable to find %s\n", name.c_str()); exit(-2);	}
+	if (!m_obj[i].mesh->Load(fpath, scale))					{ dbgprintf("ERROR: Unable to load %s\n", name.c_str());	exit(-3); }
+
+	// Allocate VBO buffers
+	int grp = 0;
+	m_obj[i].vert_cnt = 3 * m_obj[i].mesh->GetNumElem(BFACEV3);
+
+	if (m_obj[i].mesh->isActive(BVERTPOS)) {
+		glGenBuffers(1, (GLuint*)&m_obj[i].mVBO[VBO_POS]);
+		glBindBufferARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mVBO[VBO_POS]);
+		glBufferDataARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mesh->GetBufSize(BVERTPOS), m_obj[i].mesh->GetBufData(BVERTPOS), GL_DYNAMIC_DRAW);
+	}
+	if (m_obj[i].mesh->isActive(BVERTCLR)) {
+		glGenBuffers(1, (GLuint*)&m_obj[i].mVBO[VBO_CLR]);
+		glBindBufferARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mVBO[VBO_CLR]);
+		// MeshX stores colors as uint (RGBA), which the gxLib shader accept directly as uint.
+		glBufferDataARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mesh->GetBufSize(BVERTCLR), m_obj[i].mesh->GetBufData(BVERTCLR), GL_DYNAMIC_DRAW);		
+	}
+	if (m_obj[i].mesh->isActive(BVERTNORM)) {
+		glGenBuffers(1, (GLuint*)&m_obj[i].mVBO[VBO_NORM]);
+		glBindBufferARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mVBO[VBO_NORM]);
+		glBufferDataARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mesh->GetBufSize(BVERTNORM), m_obj[i].mesh->GetBufData(BVERTNORM), GL_DYNAMIC_DRAW);
+	}
+	if (m_obj[i].mesh->isActive(BVERTTEX)) {
+		glGenBuffers(1, (GLuint*)&m_obj[i].mVBO[VBO_UVS]);
+		glBindBufferARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mVBO[VBO_UVS]);
+		glBufferDataARB(GL_ARRAY_BUFFER_ARB, m_obj[i].mesh->GetBufSize(BVERTTEX), m_obj[i].mesh->GetBufData(BVERTTEX), GL_DYNAMIC_DRAW);
+	}
+	if (m_obj[i].mesh->isActive(BFACEV3)) {
+		glGenBuffers(1, (GLuint*)&m_obj[i].mVBO[VBO_FACES]);
+		glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB, m_obj[i].mVBO[VBO_FACES]);		
+		glBufferDataARB(GL_ELEMENT_ARRAY_BUFFER_ARB, m_obj[i].mesh->GetBufSize(BFACEV3), m_obj[i].mesh->GetBufData(BFACEV3), GL_DYNAMIC_DRAW);
+		
+		#ifdef LARGE_MESHES
+			// MeshX supports very large meshes natively, with int64_t so we 
+			// need to repack 64-bit vertex indices into 32-bits for OpenGL.
+			int ndx_cnt = m_obj[i].mesh->GetBufSize(BFACEV3) / sizeof(int64_t);
+			int repack_sz = ndx_cnt * sizeof(int32_t);
+			int32_t* repack_buf = (int32_t*)malloc(repack_sz);
+			int64_t* src_buf = (int64_t*)m_obj[i].mesh->GetBufData(BFACEV3);
+			int32_t* dst_buf = repack_buf;
+			for (int n = 0; n < ndx_cnt; n++) {
+				*dst_buf++ = (int32_t)*src_buf++;		// cast to 32-bit int
+			}
+			glBufferDataARB(GL_ELEMENT_ARRAY_BUFFER_ARB, repack_sz, repack_buf, GL_DYNAMIC_DRAW);
+			free(repack_buf);
+		#endif			
+	}
+}
+
+void Flock2::SketchMesh (int i)
+{
+	// sketch mesh face-by-face 
+	Vec3F n, V;
+	Vec3F v0, v1, v2;
+	Vec3F n0, n1, n2;
+	Vec3F uv0, uv1, uv2;
+	CLRVAL c0, c1, c2;
+	AttrV3* f;		// contains 64-bit vertex indices
+
+	Vec4F lclr(1, 0, 0, 1);		// line color
+	Vec4F fclr(1, 1, 1, 1);		// face color
+
+	int num_tri = m_obj[i].mesh->GetNumElem(BFACEV3);
+
+	int lines = 1;
+	float normals = 0.01f;		// 0.01f 
+
+	for (int i = 0; i < num_tri; i++) {
+		f = (AttrV3*) m_obj[i].mesh->GetElem(BFACEV3, i);
+		// get face vertices & normals
+		v0 = *m_obj[i].mesh->GetVertPos(f->v1);		v1 = *m_obj[i].mesh->GetVertPos(f->v2);		v2 = *m_obj[i].mesh->GetVertPos(f->v3);
+		n0 = *m_obj[i].mesh->GetVertNorm(f->v1);		n1 = *m_obj[i].mesh->GetVertNorm(f->v2);		n2 = *m_obj[i].mesh->GetVertNorm(f->v3);
+		
+		if (m_obj[i].mesh->isActive(BVERTCLR)) {
+			c0 = *m_obj[i].mesh->GetVertClr(f->v1);	    c1 = *m_obj[i].mesh->GetVertClr(f->v2);	    c2 = *m_obj[i].mesh->GetVertClr(f->v3);
+		}
+		else {
+			c0 = COLORA(1, 1, 1, 1); c1 = COLORA(1, 1, 1, 1); c2 = COLORA(1, 1, 1, 1);
+		}
+		V = m_cam->getPos() - v0;
+		if (n.Dot(V) >= 0) {
+			drawLine3D(v0, v1, lclr);			// wire mesh
+			drawLine3D(v1, v2, lclr);
+			drawLine3D(v2, v0, lclr);
+			
+			/* if (m_draw_normals) {
+				drawLine3D(v0, v0 + n0 * normals, Vec4F(0, 1, 1, 0.5));
+				drawLine3D(v1, v1 + n1 * normals, Vec4F(0, 1, 1, 0.5));
+				drawLine3D(v2, v2 + n2 * normals, Vec4F(0, 1, 1, 0.5));
+			}*/
+		}
+	}
+}
+
+void Flock2::RenderBirdsWithMesh (int i)
+{	
+	// Bind mesh geometry to shader slots
+	int grp = 0;
+
+	// bind pos
+	glEnableVertexAttribArray(slotPos);
+	glBindBuffer(GL_ARRAY_BUFFER, m_obj[i].mVBO[VBO_POS]);
+	glVertexAttribPointer(slotPos, 3, GL_FLOAT, GL_FALSE, 0x0, 0);		// Bind vertices				
+
+	// bind normals
+	if (m_obj[i].mVBO[VBO_NORM] != VBO_NULL) {
+		glEnableVertexAttribArray(slotNorm);
+		glBindBuffer(GL_ARRAY_BUFFER, m_obj[i].mVBO[VBO_NORM]);
+		glVertexAttribPointer(slotNorm, 3, GL_FLOAT, GL_FALSE, 0x0, 0);		// Bind normals
+	}	else {
+		glDisableVertexAttribArray(slotNorm);
+		glVertexAttrib3f(slotNorm, 1.0, 1.0, 1.0);		// value when not bound
+	}
+	// bind texture coords
+	if (m_obj[i].mVBO[VBO_UVS] != VBO_NULL) {
+		glEnableVertexAttribArray(slotUVs);
+		glBindBuffer(GL_ARRAY_BUFFER, m_obj[i].mVBO[VBO_UVS]);
+		glVertexAttribPointer(slotUVs, 2, GL_FLOAT, GL_FALSE, 0x0, 0);
+	}
+	else {
+		glDisableVertexAttribArray(slotUVs);
+		glVertexAttrib2f(slotUVs, 1.0, 1.0);		// value when not bound
+	}
+	// bind clr
+	if (m_obj[i].mVBO[VBO_CLR] != VBO_NULL) {
+		glEnableVertexAttribArray(slotClr);
+		glBindBuffer(GL_ARRAY_BUFFER, m_obj[i].mVBO[VBO_CLR]);
+		glVertexAttribIPointer(slotClr, 1, GL_UNSIGNED_INT, 0x0, 0);
+	}
+	else {
+		glDisableVertexAttribArray(slotClr);
+		glVertexAttribI1ui(slotClr, COLORA(1, 1, 1, 1));	// value when not bound
+	}
+	// bind face indices		
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_obj[i].mVBO[VBO_FACES]);				// Bind face indices		
+
+	Matrix4F model;
+
+	// Render birds
+	Bird* b;	
+	for (int n = 0; n < m_Birds .GetNumElem(0); n++) {		
+
+		b = (Bird*) m_Birds.GetElem(0, n);
+
+		model.Identity();		
+		//model.Scale (10,10,10);
+		model = b->orient.getMatrix();
+		model.PostTranslate( b->pos );			// translation		
+
+		selfSetModelMtx ( model );		
+
+		// Draw elements			
+		glDrawElements(GL_TRIANGLES, m_obj[i].vert_cnt, GL_UNSIGNED_INT, (void*) 0);
+	}
+}
+
+
+void Flock2::RenderBirdsWithDart ()
+{
+	Vec3F x,y,z, p,q,r,t;
+	Vec4F clr;
+	Bird* b;
+	float bird_size = 0.10f; //0.05f;	
+
+	for (int n = 0; n < m_Birds.GetNumElem(0); n++) {
+
+		// bird color
+		b = (Bird*)m_Birds.GetElem(0, n);
+		clr = Vec4F(0, 0, 0, 1);							// default. black on sky/white.			
+		if (m_visualize == 1) {									// infovis coloring..				
+			if (b->clr.w == 0) {
+				float a = fmin(b->ang_accel.Length() / 24, 1);
+				clr = Vec4F(0, a, 0, 1);			// untagged, use green = angular accel
+			}
+			else {
+				clr = b->clr;										// use tagged color (orange=boundary bird)
+			}
+		}
+		// bird shape
+		if (m_visualize == 1) {
+			// line
+			drawLine3D(b->pos, b->pos + (b->vel * bird_size), clr);
+		}
+		else {
+			// dart
+			x = Vec3F(1, 0, 0) * b->orient;
+			y = Vec3F(0, 1, 0) * b->orient;
+			z = Vec3F(0, 0, 1) * b->orient;			
+			p = b->pos - z * 0.3f;   // wingspan = 40 cm = 0.2m (per wing)
+			q = b->pos + z * 0.3f;
+			r = b->pos + x * 0.8f;   // length = 22 cm = 0.22m
+			t = y;
+			drawTri3D(p, q, r, t, clr, true);
+		}
+	}
+}
+
 
 void Flock2::drawBackground ()
 {
@@ -2629,7 +2865,8 @@ void Flock2::drawBackground ()
 	switch (m_visualize) {
 	case 0:
 		// realistic		
-		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
+    drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.1,.1,.4,1), Vec4F(.1,.1,.4,1), Vec4F(0.5,0.4,.6,1), Vec4F(0.5,0.4,.6,1) );
+		//drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
 		break;
 	case 1:
 		// infovis - green angular accel
@@ -2673,101 +2910,73 @@ void Flock2::display ()
 	glClearColor(1,1,1,1);
 	clearGL();
 
-	start2D( w, h);			// this 2D draw goes behind (before) the 3D stuff
-		drawBackground ();	// <-- this was changed to drawBackground. was SetBackground before.
-	end2D();
+	//----------- 2D Background (sketch mode)
+	//
+	start2D(w, h);					// this 2D draw goes behind (before) the 3D stuff
+		drawBackground ();
+	end2D(); 
 
-	start3D(m_cam);			// draws all 3D stuff
+	//----------- 3D Render (sketch mode)
+	//
+	if (m_draw_mesh==0) {
 
-		setLight3D ( Vec3F(0, 200, 0), Vec4F(1, 1, 1, 1) );	
-		setMaterial ( Vec3F(0,0,0), Vec3F(1,1,1), Vec3F(0,0,0), 40, 1.0 );
+		start3D(m_cam);			// draws all 3D stuff
 
-		// Draw grid
-		if (m_viewgrid) {
-			drawGrid( Vec4F(0.4,0.4,0.4,1) );
-		}
+			setLight3D ( Vec3F(0, 200, 0), Vec4F(1, 1, 1, 1) );	
+			setMaterial ( Vec3F(0,0,0), Vec3F(1,1,1), Vec3F(0,0,0), 40, 1.0 );
+			// setEnvmap3D(&m_env_map);
 
-		// Draw selected bird 
-		if (m_bird_sel != -1) {
-			
-			// draw visualization elements 
-			// this includes:
-			// - selected bird (green)
-			// - neighobr birds (yellow)
-			// - nearest bird (red)
-			Vec3F cn, p;
-			for (int k=0; k < m_vis.size(); k++) {				
-				drawCircle3D ( m_vis[k].pos, m_cam->getPos(), m_vis[k].radius, m_vis[k].clr );
-			}			
-		}		
-
-		// Draw acceleration grid
-		if (m_draw_grid) {
-			drawBox3D ( m_Accel.bound_min, m_Accel.bound_max, Vec4F(0,1,1,0.5) );
-			DrawAccelGrid ();
-		}		
-
-		// Draw centroid
-		if (m_visualize == 1 ) {
-			drawCircle3D(m_Flock.centroid, 0.5, Vec4F(Vec4F(0.804, 0.961, 0.008, 1)));
-		}
-
-		float bird_size = 0.10f; //0.05f;
-		float predator_size = 0.1f;
-
-		for (int n=0; n < m_Birds.GetNumElem(0); n++) {
-
-			b = (Bird*) m_Birds.GetElem(0, n);
-
-			// bird color
-			clr = Vec4F(0, 0, 0, 1);							// default. black on sky/white.			
-			if (m_visualize==1) {									// infovis coloring..				
-
-					if ( b->clr.w==0) {
-						float a = fmin(b->ang_accel.Length() / 24, 1);
-						clr = Vec4F( 0, a, 0, 1 );			// untagged, use green = angular accel
-					} else {
-						clr = b->clr;										// use tagged color (orange=boundary bird)
-					}
+			// Draw grid
+			if (m_viewgrid) {
+				drawGrid( Vec4F(0.4,0.4,0.4,1) );
 			}
+
+			// Draw selected bird 
+			if (m_bird_sel != -1) {
 			
-			// bird shape
-			if (m_visualize==1 ) {
+				// draw visualization elements 
+				// this includes:
+				// - selected bird (green)
+				// - neighobr birds (yellow)
+				// - nearest bird (red)
+				Vec3F cn, p;
+				for (int k=0; k < m_vis.size(); k++) {				
+					drawCircle3D ( m_vis[k].pos, m_cam->getPos(), m_vis[k].radius, m_vis[k].clr );
+				}			
+			}	
 
-				// line
-				drawLine3D ( b->pos,		b->pos + (b->vel * bird_size ),	clr );								
+			// Draw acceleration grid
+			if (m_draw_grid) {
+				drawBox3D ( m_Accel.bound_min, m_Accel.bound_max, Vec4F(0,1,1,0.5) );
+				DrawAccelGrid ();
+			}		
 
-			} else {
-
-				// dart
-				x = Vec3F(1,0,0) * b->orient;
-				y = Vec3F(0,1,0) * b->orient;
-				z = Vec3F(0,0,1) * b->orient;
-				Vec3F p,q,r,t;
-				p = b->pos - z * 0.3f;   // wingspan = 40 cm = 0.2m (per wing)
-				q = b->pos + z * 0.3f;
-				r = b->pos + x * 0.8f;   // length = 22 cm = 0.22m
-				t = y;				
-				drawTri3D ( p, q, r, t, clr, true );
+			// Draw centroid
+			if (m_visualize == 1 ) {
+				drawCircle3D(m_Flock.centroid, 0.5, Vec4F(Vec4F(0.804, 0.961, 0.008, 1)));
 			}
-		
-		}
-		// ***** Draw predator with circle around it, static
-		Vec4F pclr (1,0,0,1);
-		for (int n = 0; n < m_Predators.GetNumElem(FPREDATOR); n++) {
-			p = (Predator*)m_Predators.GetElem(FPREDATOR, n);
-
-			//printf("Predator is at: %f, %f, %f \n", p->pos.x, p->pos.y, p->pos.z);
-
-			//pclr = (p->currentState == ATTACK) ? Vec4F(1, 0, 0, 1) : Vec4F(0, 0, 1, 1);				
-
-			drawLine3D (p->pos, p->pos + (p->vel * predator_size), pclr);
-			drawCircle3D (p->pos, p->pos + (p->vel * predator_size), 0.5, pclr);
-		}
-	end3D(); 
 	
-	Vec4F tc (1,1,1,1);	
+			RenderBirdsWithDart ();
+		
+			// ***** Draw predator with circle around it, static
+			float predator_size = 0.1f;
+			Vec4F pclr (1,0,0,1);
+			for (int n = 0; n < m_Predators.GetNumElem(FPREDATOR); n++) {
+				p = (Predator*)m_Predators.GetElem(FPREDATOR, n);
 
+				//printf("Predator is at: %f, %f, %f \n", p->pos.x, p->pos.y, p->pos.z);
+
+				//pclr = (p->currentState == ATTACK) ? Vec4F(1, 0, 0, 1) : Vec4F(0, 0, 1, 1);				
+
+				drawLine3D (p->pos, p->pos + (p->vel * predator_size), pclr);
+				drawCircle3D (p->pos, p->pos + (p->vel * predator_size), 0.5, pclr);
+			}
+		end3D(); 
+	}
+
+	//----------- 2D Overlay (sketch mode)
+	//
+	Vec4F tc (1,1,1,1);	
 	float xscal, yscal;
 
 	start2D ( w, h );			// this 2D draw is overlayed on top
@@ -2839,15 +3048,26 @@ void Flock2::display ()
 				}
 			}		
 		}
-
 		// Current time
 		/* sprintf ( msg, "t = %4.3f sec", m_time );	
 		setTextSz ( 24, 0 );						// set text height
 		drawText ( Vec2F(getWidth()-600, 10), msg, tc );	*/
-
 	end2D(); 
 
-	drawAll ();				// does actual render of everything
+	// Render all items from sketch mode (actual OpenGL render)
+	drawAll ();				
+
+	// Render birds as meshes (direct mode, OpenGL)
+	if (m_draw_mesh > 0) {		
+		selfStartDraw3D(m_cam);
+		selfSetLight3D(Vec3F(0, 100, 200), Vec4F(1.5, 1.5, .6, 1));
+		selfSetTexture();
+		selfSetMaterial(Vec3F(0, 0, 0), Vec3F(.5, .5, .5), Vec3F(2.0, 2.0, 0), 50, 1.0);
+
+		RenderBirdsWithMesh ( m_draw_mesh-1 );
+
+		selfEndDraw3D();
+	}
 	
 	appPostRedisplay();		// Post redisplay since simulation is continuous
 }
@@ -2941,7 +3161,9 @@ void Flock2::keyboard(int keycode, AppEnum action, int mods, int x, int y)
 	case 'v': 
 		if (++m_visualize > 2 ) m_visualize = 0;
 		break;
-	case 's': m_draw_sphere = !m_draw_sphere; break;
+	case 's': 
+		if (++m_draw_mesh > 2 ) m_draw_mesh = 0;
+		break;
 	case 'g': m_draw_grid = !m_draw_grid; break;
 	case 'p': m_draw_plot = !m_draw_plot; break;
   case 'c': 		
@@ -2959,7 +3181,7 @@ void Flock2::keyboard(int keycode, AppEnum action, int mods, int x, int y)
 		if (m_bird_sel > m_Birds.GetNumElem(0)) m_bird_sel = m_Birds.GetNumElem(0)-1;		
 		break;
 	};
-	printf ( "%d \n", m_bird_sel );
+	// printf ( "%d \n", m_bird_sel );
 }
 
 void Flock2::reshape (int w, int h)

@@ -99,8 +99,6 @@ if ( NOT DEFINED ASSET_PATH )
 endif()
 add_definitions(-DASSET_PATH="${ASSET_PATH}/")
 
-file(GLOB GLSL_FILES ${ASSET_PATH}/*.glsl )
-
 #####################################################################################
 # Executable
 #
@@ -155,6 +153,10 @@ endif()
 #
 #
 _DEFAULT_INSTALL_PATH()
+
+# Install Libmin DLLs
+file(GLOB LIBMIN_DLLS "${LIBMIN_LIB_DIR}/*.dll" )
+_INSTALL ( FILES ${LIBMIN_DLLS} DESTINATION ${CMAKE_INSTALL_PREFIX} )
 
 # *NOTE*: file COPY is at cmake-time, not compile-time. Need to replace with add_custom_command -E copy_directory (my own _COPY)
 
