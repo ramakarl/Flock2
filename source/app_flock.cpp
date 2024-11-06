@@ -368,7 +368,7 @@ void Flock2::DefaultParams ()
 	// SI units:
 	// vel = m/s, accel = m/s^2, mass = kg, thrust(power) = N (kg m/s^2)	
 	//
-	m_Params.num_birds = 1000;
+	m_Params.num_birds = 10000;
 	m_Params.num_predators = 0;
   m_Params.neighbors = 7;
 
@@ -2644,8 +2644,8 @@ bool Flock2::init ()
 	StartNextRun ();				// this will call Reset
 	
 	// Load 3D mesh
-	LoadMesh (0, "starling_low_poly.obj", 5.0 );	
-	LoadMesh (1, "putto.obj", 2.0);
+	// LoadMesh (0, "starling_low_poly.obj", 5.0 );	
+	// LoadMesh (1, "putto.obj", 2.0);
 
 	return true;
 }
@@ -2865,8 +2865,8 @@ void Flock2::drawBackground ()
 	switch (m_visualize) {
 	case 0:
 		// realistic		
-    drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.1,.1,.4,1), Vec4F(.1,.1,.4,1), Vec4F(0.5,0.4,.6,1), Vec4F(0.5,0.4,.6,1) );
-		//drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
+		// drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.1,.1,.4,1), Vec4F(.1,.1,.4,1), Vec4F(0.5,0.4,.6,1), Vec4F(0.5,0.4,.6,1) );
+		drawGradient ( Vec2F(0,0), Vec2F(w,h), Vec4F(.6,.7,.8,1), Vec4F(.6,.6,.8,1), Vec4F(1,1,.9,1), Vec4F(1,1,.9,1) );
 		break;
 	case 1:
 		// infovis - green angular accel
@@ -3199,11 +3199,11 @@ void Flock2::startup ()
 {
 	addSearchPath (ASSET_PATH);
 
-  // Default config
-	m_gpu = 1;	
-	m_method = 0;					// 0 = Flock2, 1 = Reynolds	 
-	m_analysis = 0;				// 0 = off, 1 = analyze freq & energy
-	m_visualize = 0;			// 0 = realistic
+        // Default config
+ 	m_gpu = 1;	
+	m_method = 0;			// 0 = Flock2, 1 = Reynolds	 
+	m_analysis = 0;			// 0 = off, 1 = analyze freq & energy
+	m_visualize = 1;		// 0 = realistic, 1 = infovis, 2 = black&white
 	m_viewgrid = 0;
 	m_seed = 12;
 
@@ -3211,7 +3211,7 @@ void Flock2::startup ()
 	SetupParams();
 	DefaultParams();
 
-	int w = 3840, h = 2048;
+	int w = 1920, h = 1080;
 	appStart ( "Flock2 (c) 2024 Hoetzlein", "Flock2", w, h, 4, 2, 16, false );	
 
 	// on_arg is called before init() to load scene and config parameters

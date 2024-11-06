@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 2.8...3.5)
 set (CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR} CACHE PATH "")
 
 # CUDA policy. Use older FindCUDA (not using: cmake >3.27 first-class support for .cu files)
-cmake_policy(SET CMP0146 OLD)
+# cmake_policy(SET CMP0146 OLD)
 
 set(PROJNAME Flock2)
 Project(${PROJNAME})
@@ -63,6 +63,9 @@ _REQUIRE_GLEW()
 
 OPTION ( BUILD_CUDA "Build CUDA for GPU." false )
 if (BUILD_CUDA)
+  enable_language(CUDA)
+  set(CUDA_PTX_COMPILATION ON)
+  include_directories( "${LIBMIN_ROOT}/cuda" )
   _REQUIRE_CUDA( TRUE, "source" )
 endif()
 
@@ -83,11 +86,7 @@ if (FFTW_FOUND)
   _EXPANDLIST( OUTPUT PACKAGE_DLLS SOURCE ${FFTW_LIB_DIR} FILES ${FFTW_DLL} )
   message ( STATUS "  ---> Using FFTW 3.3")  
 else()
-  message ( "WARNING: 
-  FFTW not found. Frequency analysis will not be enabled. 
-  Set cmake LIBEXT_ROOT variable to a /libext which contains 
-  FindFFTW.cmake and libfftw3-3.lib/dll/so.
-  ")
+  message ( "WARNING: FFTW Not Found. Frequency analysis will not be enabled for Flock2." )
 endif()
 
 #####################################################################################
@@ -120,6 +119,10 @@ include_directories ("${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_executable (${PROJNAME} ${ALL_SOURCE_FILES} ${CUDA_FILES} ${GLSL_FILES} )
 
+if (BUILD_CUDA) 
+  target_link_libraries( ${PROJNAME} CUDA::cuda_driver)
+endif()
+
 set_property ( TARGET ${PROJNAME} APPEND PROPERTY DEPENDS )
 
 #--- debug and release exe
@@ -142,8 +145,10 @@ source_group( CUDA FILES ${CUDA_FILES})
 # Install Kernels
 #
 
+message ( "PTX: ${CUDA_PTX_PATHS}" )
+
 if (BUILD_CUDA)
-   _INSTALL_PTX ( FILES ${CUDA_PTX_PATHS} DESTINATION ${CMAKE_INSTALL_PREFIX} OUTPUT INSTALL_LIST )
+   _INSTALL ( FILES ${CUDA_PTX_PATHS} DESTINATION ${CMAKE_INSTALL_PREFIX} OUTPUT INSTALL_LIST )
 endif()
 
 # install ( FILES ${CUDA_PTX_PATHS} DESTINATION ${CMAKE_INSTALL_PREFIX} )
@@ -164,7 +169,10 @@ file (COPY "${CMAKE_CURRENT_SOURCE_DIR}/assets" DESTINATION ${CMAKE_INSTALL_PREF
 _INSTALL ( FILES ${GLEW_FILES} DESTINATION ${CMAKE_INSTALL_PREFIX} )
 _INSTALL ( FILES ${SHADERS} DESTINATION "${CMAKE_INSTALL_PREFIX}/assets" )		# shaders
 _INSTALL ( FILES ${PACKAGE_DLLS} DESTINATION ${CMAKE_INSTALL_PREFIX} )		# DLLs
-install ( FILES $<TARGET_PDB_FILE:${PROJNAME}> DESTINATION ${CMAKE_INSTALL_PREFIX} OPTIONAL )		# PDB
+
+if (WIN32)
+  install ( FILES $<TARGET_PDB_FILE:${PROJNAME}> DESTINATION ${CMAKE_INSTALL_PREFIX} OPTIONAL )		# PDB
+endif()
 
 install ( FILES ${INSTALL_LIST} DESTINATION ${CMAKE_INSTALL_PREFIX} )		# exe, pdb
 
